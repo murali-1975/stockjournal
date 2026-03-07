@@ -1,0 +1,32 @@
+{
+  "cols": [
+    "Symbol",
+    "ISIN",
+    "Trade Date",
+    "Exchange",
+    "Segment",
+    "Series",
+    "Trade Type",
+    "Auction",
+    "Quantity",
+    "Price",
+    "Trade ID",
+    "Order ID",
+    "Order Execution Time"
+  ],
+  "first": {
+    "Symbol": "POLYCAB",
+    "ISIN": "INE455K01017",
+    "Trade Date": "2025-09-08",
+    "Exchange": "NSE",
+    "Segment": "EQ",
+    "Series": "EQ",
+    "Trade Type": "buy",
+    "Auction": false,
+    "Quantity": 13,
+    "Price": 7343,
+    "Trade ID": "405271862",
+    "Order ID": "1200000047930385",
+    "Order Execution Time": "2025-09-08T13:01:01"
+  }
+}
