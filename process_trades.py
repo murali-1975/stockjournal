@@ -13,7 +13,10 @@ def load_data(input_file):
     """
     print(f"Reading {input_file}...")
     try:
-        df = pd.read_excel(input_file)
+        # Check columns to assign proper types to ID columns to prevent scientific notation
+        df_cols = pd.read_excel(input_file, nrows=0).columns
+        dtypes = {col: str for col in df_cols if 'ID' in col.upper()}
+        df = pd.read_excel(input_file, dtype=dtypes)
     except FileNotFoundError:
         print(f"Error: {input_file} not found.")
         return None
@@ -376,6 +379,9 @@ def calculate_portfolios(df, grouped_df):
                  'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
     portfolio_df = portfolio_df[port_cols]
     
+    # Remove EMA columns from overall_df
+    overall_df = overall_df.drop(columns=['EMA9', 'EMA10', 'EMA11', 'EMA21'])
+    
     return portfolio_df, overall_df
 
 def process_tradebook(input_file, output_file, config_file=None):
@@ -383,13 +389,44 @@ def process_tradebook(input_file, output_file, config_file=None):
     Main execution function to load data, process sheets, and save to Excel.
     
     Args:
-        input_file (str): Path to the input tradebook Excel file.
-        output_file (str): Path to save the transformed Excel file.
+        input_file (str): Path to the input tradebook Excel file containing new trades.
+        output_file (str): Path to master DB (Transformed_Tradebook.xlsx).
         config_file (str, optional): Path to the config file for tranch logic.
     """
-    df = load_data(input_file)
-    if df is None:
+    import os
+    
+    # Try to load existing Raw_Tradebook master database
+    master_df = None
+    if os.path.exists(output_file):
+        try:
+            df_cols = pd.read_excel(output_file, sheet_name='Raw_Tradebook', nrows=0).columns
+            dtypes = {col: str for col in df_cols if 'ID' in col.upper()}
+            master_df = pd.read_excel(output_file, sheet_name='Raw_Tradebook', dtype=dtypes)
+            print(f"Loaded existing master database from {output_file} ('Raw_Tradebook' sheet).")
+        except Exception:
+            print(f"No existing 'Raw_Tradebook' sheet found in {output_file}. Starting fresh.")
+            
+    # Load new trades from input_file
+    new_df = load_data(input_file)
+    
+    if new_df is None and master_df is None:
+        print("No valid data available to process. Exiting.")
         return
+        
+    df = None
+    if master_df is not None and new_df is not None:
+        print("Appending new trades to the master database...")
+        df = pd.concat([master_df, new_df], ignore_index=True)
+        # Deduplicate exactly matching trades to prevent double-counting
+        before_len = len(df)
+        df = df.drop_duplicates(subset=['Trade Date', 'Symbol', 'Trade Type', 'Quantity', 'Price'])
+        after_len = len(df)
+        if before_len > after_len:
+            print(f"Dropped {before_len - after_len} duplicate trades.")
+    elif new_df is not None:
+        df = new_df
+    else:
+        df = master_df
         
     config = load_config(config_file) if config_file else {}
         
@@ -400,11 +437,30 @@ def process_tradebook(input_file, output_file, config_file=None):
     
     print(f"Saving transformed data to {output_file}...")
     try:
-        # Use ExcelWriter to save multiple sheets
-        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        mode = 'a' if os.path.exists(output_file) else 'w'
+        if_sheet_exists = 'replace' if mode == 'a' else None
+        
+        # Use ExcelWriter to save multiple sheets, appending or replacing as needed
+        with pd.ExcelWriter(output_file, engine='openpyxl', mode=mode, if_sheet_exists=if_sheet_exists) as writer:
+            df.to_excel(writer, sheet_name='Raw_Tradebook', index=False)
             grouped_df.to_excel(writer, sheet_name='Transaction', index=False)
             portfolio_df.to_excel(writer, sheet_name='Current_Portfolio', index=False)
             overall_df.to_excel(writer, sheet_name='Overall_Portfolio', index=False)
+            
+            # Apply Excel native format for massive numbers to avoid scientific notation
+            worksheet_raw = writer.sheets['Raw_Tradebook']
+            for col_idx, col_name in enumerate(df.columns, 1):
+                if 'ID' in str(col_name).upper():
+                    for row in range(2, len(df) + 2):
+                        cell = worksheet_raw.cell(row=row, column=col_idx)
+                        # Assign numeric value directly, openpyxl will handle it smoothly if format is set
+                        try:
+                            # Strip any floating points from scientific notation if they sneaked in during string cast
+                            if pd.notna(cell.value):
+                                cell.value = int(float(cell.value))
+                        except Exception:
+                            pass
+                        cell.number_format = '0'
             
             # Apply Excel native currency formatting (Number format)
             inr_format = '[$₹-en-IN] #,##0.00'
@@ -424,7 +480,7 @@ def process_tradebook(input_file, output_file, config_file=None):
             worksheet_overall = writer.sheets['Overall_Portfolio']
             for col_idx, col_name in enumerate(overall_df.columns, 1):
                 if col_name in ['Total_Buy_Value', 'Average_Buy_Price', 'Total_Sell_Value', 'Average_Sell_Price', 
-                                'Invested_Value', 'LTP', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Realized_PnL', 'Unrealized_PnL', 'Total_PnL']:
+                                'Invested_Value', 'LTP', 'Current_Value', 'Realized_PnL', 'Unrealized_PnL', 'Total_PnL']:
                     for row in range(2, len(overall_df) + 2):
                         worksheet_overall.cell(row=row, column=col_idx).number_format = inr_format
                 elif col_name == 'Total_PnL_Percentage':
