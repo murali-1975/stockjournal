@@ -5,7 +5,8 @@ Stock Journal - Main Orchestrator
 Entry point for the Stock Journal trade processing engine.
 
 Usage:
-    python main.py
+    python main.py           Run the full trade processing pipeline
+    python main.py --test    Run all tests before processing
 
 This script:
     1. Loads the configuration from `input.cfg`.
@@ -26,15 +27,51 @@ File Structure:
         market_api.py    - Yahoo Finance data fetcher
         calculations.py  - Trade grouping, PnL, and Stop Loss math
         excel_writer.py  - Excel workbook formatting and export
+    tests/
+        test_config.py        - Config parser tests
+        test_data_io.py       - Data I/O and dedup tests
+        test_calculations.py  - Tranche, PnL, and SL tests
+        test_excel_writer.py  - Excel formatting tests
     input.cfg            - User-defined portfolio configuration
 """
 
 import os
+import sys
 
 from src.config import load_config
 from src.data_io import load_data, load_master_database, merge_and_deduplicate
 from src.calculations import process_grouped_trades, calculate_portfolios
 from src.excel_writer import save_workbook
+
+
+def run_tests() -> bool:
+    """
+    Discovers and runs all test cases in the tests/ directory.
+
+    Returns:
+        True if all tests passed, False otherwise.
+    """
+    import unittest
+
+    print("=" * 60)
+    print("  RUNNING TEST SUITE")
+    print("=" * 60)
+
+    loader = unittest.TestLoader()
+    suite = loader.discover('tests', pattern='test_*.py')
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+
+    print()
+    if result.wasSuccessful():
+        print("✅ ALL TESTS PASSED!")
+    else:
+        print("❌ SOME TESTS FAILED!")
+        print(f"   Failures: {len(result.failures)}")
+        print(f"   Errors:   {len(result.errors)}")
+
+    print("=" * 60)
+    return result.wasSuccessful()
 
 
 def main():
@@ -75,4 +112,15 @@ def main():
 
 
 if __name__ == "__main__":
+    if '--test' in sys.argv:
+        success = run_tests()
+        if not success:
+            print("\n⚠️  Tests failed. Fix issues before running the actual processing.")
+            sys.exit(1)
+
+        # If --test is the only flag, exit after tests
+        if len(sys.argv) == 2:
+            print("\nTests complete. Run without --test to process trades.")
+            sys.exit(0)
+
     main()
