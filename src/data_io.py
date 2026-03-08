@@ -151,13 +151,13 @@ def load_equity_master(config: dict) -> pd.DataFrame | None:
         df = pd.read_excel(equity_file, sheet_name='Equity Master')
         df.columns = df.columns.str.strip()
 
-        required = ['Stock Symbol', 'TF Sector Classification', 'TF Stock Classfication']
+        required = ['Stock Id', 'TF Sector Classification', 'TF Stock Classfication']
         missing = [c for c in required if c not in df.columns]
         if missing:
             print(f"Equity Master missing columns: {missing}. Skipping TF columns.")
             return None
 
-        result = df[['Stock Symbol', 'TF Sector Classification', 'TF Stock Classfication']].copy()
+        result = df[['Stock Id', 'TF Sector Classification', 'TF Stock Classfication']].copy()
         result.columns = ['Symbol', 'TF_Sector', 'TF_Classification']
         result['Symbol'] = result['Symbol'].str.strip()
         return result
