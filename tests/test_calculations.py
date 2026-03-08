@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.calculations import process_grouped_trades, _get_stop_loss, _classify_market_cap, calculate_portfolios
+from src.calculations import process_grouped_trades, _get_stop_loss, _classify_market_cap, _get_latest_tranche_cheat, calculate_portfolios
 
 
 class TestProcessGroupedTrades(unittest.TestCase):
@@ -196,6 +196,8 @@ class TestCalculatePortfolios(unittest.TestCase):
         self.assertIn('EMA21', portfolio_df.columns)
         self.assertIn('Cap', portfolio_df.columns)
         self.assertEqual(portfolio_df.iloc[0]['Cap'], 'Large Cap')
+        self.assertIn('Latest_Tranche', portfolio_df.columns)
+        self.assertEqual(portfolio_df.iloc[0]['Latest_Tranche'], 'Tranch 1')
 
         # Overall Portfolio checks
         self.assertNotIn('EMA9', overall_df.columns)  # EMAs removed from overall
@@ -303,6 +305,58 @@ class TestClassifyMarketCap(unittest.TestCase):
         """Without config, SEBI defaults should apply."""
         result = _classify_market_cap(1_800_000_000_000, {})
         self.assertEqual(result, 'Large Cap')
+
+
+class TestLatestTrancheCheat(unittest.TestCase):
+    """Test suite for _get_latest_tranche_cheat function."""
+
+    def test_single_tranch(self):
+        """Single Tranch 1 should return 'Tranch 1'."""
+        gdf = pd.DataFrame({
+            'Symbol': ['STOCK'], 'Trade Type': ['buy'], 'Tranches/Cheat': ['Tranch 1']
+        })
+        self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), 'Tranch 1')
+
+    def test_multiple_tranches(self):
+        """Should return the highest numbered Tranche."""
+        gdf = pd.DataFrame({
+            'Symbol': ['STOCK'] * 3,
+            'Trade Type': ['buy'] * 3,
+            'Tranches/Cheat': ['Tranch 1', 'Tranch 2', 'Tranch 3']
+        })
+        self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), 'Tranch 3')
+
+    def test_cheats_only(self):
+        """If only cheats, return the highest cheat."""
+        gdf = pd.DataFrame({
+            'Symbol': ['STOCK'] * 2,
+            'Trade Type': ['buy'] * 2,
+            'Tranches/Cheat': ['Cheat 1', 'Cheat 2']
+        })
+        self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), 'Cheat 2')
+
+    def test_mixed_tranch_and_cheat(self):
+        """Tranch 2 should beat Cheat 1 (higher number)."""
+        gdf = pd.DataFrame({
+            'Symbol': ['STOCK'] * 3,
+            'Trade Type': ['buy'] * 3,
+            'Tranches/Cheat': ['Tranch 1', 'Cheat 1', 'Tranch 2']
+        })
+        self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), 'Tranch 2')
+
+    def test_no_tranch_column(self):
+        """Without Tranches/Cheat column, should return empty string."""
+        gdf = pd.DataFrame({'Symbol': ['STOCK'], 'Trade Type': ['buy']})
+        self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), '')
+
+    def test_sell_rows_ignored(self):
+        """Sell rows should not contribute to the latest label."""
+        gdf = pd.DataFrame({
+            'Symbol': ['STOCK'] * 2,
+            'Trade Type': ['buy', 'sell'],
+            'Tranches/Cheat': ['Tranch 1', 'N/A']
+        })
+        self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), 'Tranch 1')
 
 
 if __name__ == '__main__':

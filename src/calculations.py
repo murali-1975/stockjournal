@@ -231,6 +231,53 @@ def _classify_market_cap(market_cap: float, config: dict) -> str:
         return 'Mid Cap'
 
 
+def _get_latest_tranche_cheat(symbol: str, grouped_df: pd.DataFrame) -> str:
+    """
+    Returns the latest (highest-numbered) Tranche or Cheat label for a symbol.
+
+    Scans the grouped transaction DataFrame for all buy rows matching the
+    given symbol and finds the label with the highest number. If a symbol
+    has both Tranche and Cheat entries, the one with the higher number is
+    returned. If numbers are equal, Tranche takes priority.
+
+    Args:
+        symbol:     The stock ticker symbol to look up.
+        grouped_df: The grouped transaction DataFrame with 'Tranches/Cheat' column.
+
+    Returns:
+        The latest label string (e.g., 'Tranch 3', 'Cheat 2'), or '' if none found.
+    """
+    import re
+
+    if 'Tranches/Cheat' not in grouped_df.columns:
+        return ''
+
+    sym_buys = grouped_df[
+        (grouped_df['Symbol'] == symbol) &
+        (grouped_df['Trade Type'].str.lower() == 'buy')
+    ]
+
+    if sym_buys.empty:
+        return ''
+
+    max_label = ''
+    max_num = 0
+
+    for label in sym_buys['Tranches/Cheat']:
+        if label == 'N/A' or pd.isna(label):
+            continue
+        match = re.match(r'(Tranch|Cheat)\s+(\d+)', str(label))
+        if match:
+            num = int(match.group(2))
+            label_type = match.group(1)
+            # Higher number wins; if equal, Tranch > Cheat
+            if num > max_num or (num == max_num and label_type == 'Tranch'):
+                max_num = num
+                max_label = label
+
+    return max_label
+
+
 def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dict = None) -> tuple:
     """
     Calculates current holdings, overall trade summary, and PnL statistics.
@@ -295,6 +342,11 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     overall_df['Market_Cap'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Market_Cap', 0))
     overall_df['Cap'] = overall_df['Market_Cap'].apply(lambda mc: _classify_market_cap(mc, config))
 
+    # --- Latest Tranche/Cheat per symbol ---
+    overall_df['Latest_Tranche'] = overall_df['Symbol'].apply(
+        lambda sym: _get_latest_tranche_cheat(sym, grouped_df)
+    )
+
     overall_df['Current_Value'] = (overall_df['Current_Quantity'] * overall_df['LTP']).round(2)
 
     # --- PnL Calculations ---
@@ -310,7 +362,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
 
     # --- Format and Order Columns for Overall Portfolio ---
     cols_order = [
-        'Symbol', 'Cap', 'Total_Buy_Quantity', 'Total_Buy_Value', 'Average_Buy_Price',
+        'Symbol', 'Cap', 'Latest_Tranche', 'Total_Buy_Quantity', 'Total_Buy_Value', 'Average_Buy_Price',
         'Total_Sell_Quantity', 'Total_Sell_Value', 'Average_Sell_Price',
         'Current_Quantity', 'Invested_Value', 'LTP', 'Current_Value',
         'Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage',
@@ -320,7 +372,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
 
     # --- Current Portfolio View (only active positions) ---
     portfolio_df = overall_df[overall_df['Current_Quantity'] > 0][
-        ['Symbol', 'Cap', 'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
+        ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
          'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
     ].copy()
 
@@ -328,7 +380,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     portfolio_df['SL'] = portfolio_df.apply(lambda row: _get_stop_loss(row, grouped_df), axis=1)
 
     # Reorder Current Portfolio columns
-    port_cols = ['Symbol', 'Cap', 'Current_Quantity', 'Average_Buy_Price', 'SL', 'Invested_Value', 'LTP',
+    port_cols = ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'SL', 'Invested_Value', 'LTP',
                  'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
     portfolio_df = portfolio_df[port_cols]
 
