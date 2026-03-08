@@ -306,7 +306,17 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         config = {}
     df_copy = df.copy()
     df_copy['Trade Type'] = df_copy['Trade Type'].str.lower()
+    df_copy['Trade Date'] = pd.to_datetime(df_copy['Trade Date'])
     df_copy['Total Value'] = df_copy['Quantity'] * df_copy['Price']
+    today = pd.Timestamp.now().normalize()
+
+    # --- First Buy Date per symbol ---
+    first_buy = df_copy[df_copy['Trade Type'] == 'buy'].groupby('Symbol')['Trade Date'].min().reset_index()
+    first_buy.columns = ['Symbol', 'First_Buy_Date']
+
+    # --- Last Sell Date per symbol ---
+    sells_dates = df_copy[df_copy['Trade Type'] == 'sell'].groupby('Symbol')['Trade Date'].max().reset_index()
+    sells_dates.columns = ['Symbol', 'Last_Sell_Date']
 
     # --- Aggregating Buys ---
     buys = df_copy[df_copy['Trade Type'] == 'buy'].groupby('Symbol').agg(
@@ -360,12 +370,24 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         0
     )
 
+    # --- Holding Period (days) ---
+    overall_df = overall_df.merge(first_buy, on='Symbol', how='left')
+    overall_df = overall_df.merge(sells_dates, on='Symbol', how='left')
+    # If fully sold (Current_Quantity == 0), use last sell date; otherwise use today
+    overall_df['Holding_End'] = overall_df.apply(
+        lambda row: row['Last_Sell_Date'] if row['Current_Quantity'] == 0 and pd.notna(row['Last_Sell_Date']) else today,
+        axis=1
+    )
+    overall_df['Holding_Period'] = (overall_df['Holding_End'] - overall_df['First_Buy_Date']).dt.days
+    overall_df['Holding_Period'] = overall_df['Holding_Period'].fillna(0).astype(int)
+
     # --- Format and Order Columns for Overall Portfolio ---
     cols_order = [
         'Symbol', 'Cap', 'Latest_Tranche', 'Total_Buy_Quantity', 'Total_Buy_Value', 'Average_Buy_Price',
         'Total_Sell_Quantity', 'Total_Sell_Value', 'Average_Sell_Price',
         'Current_Quantity', 'Invested_Value', 'LTP', 'Current_Value',
         'Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage',
+        'Holding_Period',
         'EMA9', 'EMA10', 'EMA11', 'EMA21'
     ]
     overall_df = overall_df[cols_order].sort_values(by='Symbol')
@@ -373,7 +395,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     # --- Current Portfolio View (only active positions) ---
     portfolio_df = overall_df[overall_df['Current_Quantity'] > 0][
         ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
-         'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
+         'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL', 'Holding_Period']
     ].copy()
 
     # --- Apply Stop Loss ---
@@ -390,7 +412,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     # Reorder Current Portfolio columns
     port_cols = ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'SL',
                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
-                 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
+                 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL', 'Holding_Period']
     portfolio_df = portfolio_df[port_cols]
 
     # Remove EMA columns from Overall Portfolio (only needed in Current Portfolio)

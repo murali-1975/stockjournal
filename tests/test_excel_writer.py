@@ -62,6 +62,7 @@ class TestSaveWorkbook(unittest.TestCase):
             'EMA21': [2550.0],
             'Current_Value': [26000.0],
             'Unrealized_PnL': [1000.0],
+            'Holding_Period': [30],
         })
 
         self.overall_df = pd.DataFrame({
@@ -82,6 +83,7 @@ class TestSaveWorkbook(unittest.TestCase):
             'Unrealized_PnL': [1000.0],
             'Total_PnL': [1000.0],
             'Total_PnL_Percentage': [0.04],
+            'Holding_Period': [30],
         })
 
     def test_sheets_created(self):

@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 import pandas as pd
+import numpy as np
 
 from src.calculations import process_grouped_trades, _get_stop_loss, _classify_market_cap, _get_latest_tranche_cheat, calculate_portfolios
 
@@ -198,12 +199,15 @@ class TestCalculatePortfolios(unittest.TestCase):
         self.assertEqual(portfolio_df.iloc[0]['Cap'], 'Large Cap')
         self.assertIn('Latest_Tranche', portfolio_df.columns)
         self.assertEqual(portfolio_df.iloc[0]['Latest_Tranche'], 'Tranch 1')
+        self.assertIn('Holding_Period', portfolio_df.columns)
+        self.assertIsInstance(portfolio_df.iloc[0]['Holding_Period'], (int, np.integer))
 
         # Overall Portfolio checks
         self.assertNotIn('EMA9', overall_df.columns)  # EMAs removed from overall
         self.assertIn('Cap', overall_df.columns)
         self.assertIn('Unrealized_PnL', overall_df.columns)
         self.assertEqual(overall_df.iloc[0]['Unrealized_PnL'], 1000.0)  # (2600-2500)*10
+        self.assertIn('Holding_Period', overall_df.columns)
 
     @patch('src.calculations.fetch_market_data_from_yahoo')
     def test_realized_pnl(self, mock_yahoo):
