@@ -23,6 +23,7 @@ import re
 import numpy as np
 import pandas as pd
 
+from .data_io import load_equity_master
 from .market_api import fetch_market_data_from_yahoo
 
 
@@ -357,6 +358,16 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         lambda sym: _get_latest_tranche_cheat(sym, grouped_df)
     )
 
+    # --- TF Sector & Classification from Equity Master ---
+    equity_master = load_equity_master(config)
+    if equity_master is not None:
+        overall_df = overall_df.merge(equity_master, on='Symbol', how='left')
+        overall_df['TF_Sector'] = overall_df['TF_Sector'].fillna('')
+        overall_df['TF_Classification'] = overall_df['TF_Classification'].fillna('')
+    else:
+        overall_df['TF_Sector'] = ''
+        overall_df['TF_Classification'] = ''
+
     overall_df['Current_Value'] = (overall_df['Current_Quantity'] * overall_df['LTP']).round(2)
 
     # --- PnL Calculations ---
@@ -383,7 +394,8 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
 
     # --- Format and Order Columns for Overall Portfolio ---
     cols_order = [
-        'Symbol', 'Cap', 'Latest_Tranche', 'Total_Buy_Quantity', 'Total_Buy_Value', 'Average_Buy_Price',
+        'Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
+        'Total_Buy_Quantity', 'Total_Buy_Value', 'Average_Buy_Price',
         'Total_Sell_Quantity', 'Total_Sell_Value', 'Average_Sell_Price',
         'Current_Quantity', 'Invested_Value', 'LTP', 'Current_Value',
         'Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage',
@@ -394,7 +406,8 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
 
     # --- Current Portfolio View (only active positions) ---
     portfolio_df = overall_df[overall_df['Current_Quantity'] > 0][
-        ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
+        ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
+         'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
          'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL', 'Holding_Period']
     ].copy()
 
@@ -410,7 +423,8 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     )
 
     # Reorder Current Portfolio columns
-    port_cols = ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'SL',
+    port_cols = ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
+                 'Current_Quantity', 'Average_Buy_Price', 'SL',
                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
                  'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL', 'Holding_Period']
     portfolio_df = portfolio_df[port_cols]

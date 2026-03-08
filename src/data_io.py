@@ -124,3 +124,43 @@ def merge_and_deduplicate(master_df: pd.DataFrame | None, new_df: pd.DataFrame |
         return new_df
     else:
         return master_df
+
+
+def load_equity_master(config: dict) -> pd.DataFrame | None:
+    """
+    Loads the Equity Master reference sheet and returns a lookup DataFrame.
+
+    Reads the 'Equity Master' sheet from the file specified in config['EQUITY_MASTER'],
+    strips whitespace from column headers, and returns a DataFrame with columns:
+        - Symbol (renamed from 'Stock Symbol')
+        - TF_Sector (from 'TF Sector Classification')
+        - TF_Classification (from 'TF Stock Classfication')
+
+    Args:
+        config: The application configuration dict. Must contain 'EQUITY_MASTER' key.
+
+    Returns:
+        A DataFrame with Symbol/TF_Sector/TF_Classification, or None if unavailable.
+    """
+    equity_file = config.get('EQUITY_MASTER', '')
+    if not equity_file or not os.path.exists(equity_file):
+        print(f"Equity Master file '{equity_file}' not found. Skipping TF columns.")
+        return None
+
+    try:
+        df = pd.read_excel(equity_file, sheet_name='Equity Master')
+        df.columns = df.columns.str.strip()
+
+        required = ['Stock Symbol', 'TF Sector Classification', 'TF Stock Classfication']
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            print(f"Equity Master missing columns: {missing}. Skipping TF columns.")
+            return None
+
+        result = df[['Stock Symbol', 'TF Sector Classification', 'TF Stock Classfication']].copy()
+        result.columns = ['Symbol', 'TF_Sector', 'TF_Classification']
+        result['Symbol'] = result['Symbol'].str.strip()
+        return result
+    except Exception as e:
+        print(f"Error loading Equity Master: {e}")
+        return None
