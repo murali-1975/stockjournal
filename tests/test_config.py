@@ -23,7 +23,7 @@ class TestLoadConfig(unittest.TestCase):
     def _write_temp_config(self, content: str) -> str:
         """Helper to write a temporary config file and return its path."""
         fd, path = tempfile.mkstemp(suffix='.cfg')
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.write(content)
         return path
 
@@ -90,6 +90,26 @@ class TestLoadConfig(unittest.TestCase):
             self.assertEqual(config['TRANCH_TOLERANCE'], 0.10)
             self.assertEqual(config['CHEAT'], 75000.0)
             self.assertEqual(config['MAX_POSITION_SIZE'], 250000.0)
+        finally:
+            os.unlink(path)
+
+    def test_cap_threshold_parsing(self):
+        """Cap thresholds like 'Below ₹34,700 Cr' should parse correctly."""
+        content = (
+            "SMALL_CAP = Below ₹34,700 Cr\n"
+            "LARGE_CAP = Above ₹1,05,000 Cr\n"
+            "MEDIUM_CAP = Between ₹34,700 Cr and ₹1,05,000 Cr\n"
+        )
+        path = self._write_temp_config(content)
+        try:
+            config = load_config(path)
+            self.assertEqual(config['SMALL_CAP']['type'], 'below')
+            self.assertEqual(config['SMALL_CAP']['value'], 347_000_000_000)
+            self.assertEqual(config['LARGE_CAP']['type'], 'above')
+            self.assertEqual(config['LARGE_CAP']['value'], 1_050_000_000_000)
+            self.assertEqual(config['MEDIUM_CAP']['type'], 'between')
+            self.assertEqual(config['MEDIUM_CAP']['low'], 347_000_000_000)
+            self.assertEqual(config['MEDIUM_CAP']['high'], 1_050_000_000_000)
         finally:
             os.unlink(path)
 

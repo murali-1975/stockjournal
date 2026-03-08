@@ -105,7 +105,7 @@ def main():
     grouped_df = process_grouped_trades(df, config)
 
     # Step 6: Calculate portfolios, PnL, and Stop Loss
-    portfolio_df, overall_df = calculate_portfolios(df, grouped_df)
+    portfolio_df, overall_df = calculate_portfolios(df, grouped_df, config)
 
     # Step 7: Save everything to Excel
     save_workbook(df, grouped_df, portfolio_df, overall_df, output_path)

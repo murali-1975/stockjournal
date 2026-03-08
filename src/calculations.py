@@ -193,28 +193,70 @@ def _get_stop_loss(row: pd.Series, grouped_df: pd.DataFrame) -> float:
         return round(ema21, 2)
 
 
-def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame) -> tuple:
+def _classify_market_cap(market_cap: float, config: dict) -> str:
+    """
+    Classifies a stock based on its market capitalization.
+
+    Uses thresholds from config (SMALL_CAP, MEDIUM_CAP, LARGE_CAP).
+    Falls back to SEBI-standard defaults if config is missing.
+
+    Args:
+        market_cap: The market capitalization in absolute value (e.g., 3.47e11).
+        config:     Configuration dict containing cap threshold definitions.
+
+    Returns:
+        One of 'Large Cap', 'Mid Cap', 'Small Cap', or '' if market cap is 0.
+    """
+    if market_cap <= 0:
+        return ''
+
+    # Extract thresholds from config or use SEBI defaults
+    small_cap_cfg = config.get('SMALL_CAP', {})
+    large_cap_cfg = config.get('LARGE_CAP', {})
+
+    # Default SEBI thresholds (in absolute numbers)
+    small_cap_upper = 347_000_000_000    # ₹34,700 Cr
+    large_cap_lower = 1_050_000_000_000  # ₹1,05,000 Cr
+
+    if isinstance(small_cap_cfg, dict) and small_cap_cfg.get('type') == 'below':
+        small_cap_upper = small_cap_cfg['value']
+    if isinstance(large_cap_cfg, dict) and large_cap_cfg.get('type') == 'above':
+        large_cap_lower = large_cap_cfg['value']
+
+    if market_cap >= large_cap_lower:
+        return 'Large Cap'
+    elif market_cap < small_cap_upper:
+        return 'Small Cap'
+    else:
+        return 'Mid Cap'
+
+
+def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dict = None) -> tuple:
     """
     Calculates current holdings, overall trade summary, and PnL statistics.
 
     This function:
         1. Aggregates all buy and sell transactions per symbol.
         2. Computes average buy/sell prices and invested values.
-        3. Fetches live market data (LTP and EMAs) from Yahoo Finance.
-        4. Calculates Realized PnL (from sold positions), Unrealized PnL
+        3. Fetches live market data (LTP, EMAs, Market Cap) from Yahoo Finance.
+        4. Classifies each stock as Large Cap / Mid Cap / Small Cap.
+        5. Calculates Realized PnL (from sold positions), Unrealized PnL
            (from current holdings), and Total PnL with percentage.
-        5. Builds a Current Portfolio view (active positions only) with
+        6. Builds a Current Portfolio view (active positions only) with
            dynamic Stop Loss values.
-        6. Drops EMA columns from the Overall Portfolio (they only appear
+        7. Drops EMA columns from the Overall Portfolio (they only appear
            in Current Portfolio).
 
     Args:
         df:         The raw (or merged) trade DataFrame.
         grouped_df: The grouped transaction DataFrame with Tranche labels.
+        config:     Configuration dict with cap classification thresholds.
 
     Returns:
         A tuple of (current_portfolio_df, overall_portfolio_df).
     """
+    if config is None:
+        config = {}
     df_copy = df.copy()
     df_copy['Trade Type'] = df_copy['Trade Type'].str.lower()
     df_copy['Total Value'] = df_copy['Quantity'] * df_copy['Price']
@@ -249,6 +291,10 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame) -> tuple:
     overall_df['EMA11'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA11', 0.0))
     overall_df['EMA21'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA21', 0.0))
 
+    # --- Market Cap Classification ---
+    overall_df['Market_Cap'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Market_Cap', 0))
+    overall_df['Cap'] = overall_df['Market_Cap'].apply(lambda mc: _classify_market_cap(mc, config))
+
     overall_df['Current_Value'] = (overall_df['Current_Quantity'] * overall_df['LTP']).round(2)
 
     # --- PnL Calculations ---
@@ -264,7 +310,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame) -> tuple:
 
     # --- Format and Order Columns for Overall Portfolio ---
     cols_order = [
-        'Symbol', 'Total_Buy_Quantity', 'Total_Buy_Value', 'Average_Buy_Price',
+        'Symbol', 'Cap', 'Total_Buy_Quantity', 'Total_Buy_Value', 'Average_Buy_Price',
         'Total_Sell_Quantity', 'Total_Sell_Value', 'Average_Sell_Price',
         'Current_Quantity', 'Invested_Value', 'LTP', 'Current_Value',
         'Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage',
@@ -274,7 +320,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame) -> tuple:
 
     # --- Current Portfolio View (only active positions) ---
     portfolio_df = overall_df[overall_df['Current_Quantity'] > 0][
-        ['Symbol', 'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
+        ['Symbol', 'Cap', 'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
          'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
     ].copy()
 
@@ -282,7 +328,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame) -> tuple:
     portfolio_df['SL'] = portfolio_df.apply(lambda row: _get_stop_loss(row, grouped_df), axis=1)
 
     # Reorder Current Portfolio columns
-    port_cols = ['Symbol', 'Current_Quantity', 'Average_Buy_Price', 'SL', 'Invested_Value', 'LTP',
+    port_cols = ['Symbol', 'Cap', 'Current_Quantity', 'Average_Buy_Price', 'SL', 'Invested_Value', 'LTP',
                  'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
     portfolio_df = portfolio_df[port_cols]
 

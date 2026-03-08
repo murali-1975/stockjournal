@@ -49,6 +49,7 @@ class TestSaveWorkbook(unittest.TestCase):
 
         self.portfolio_df = pd.DataFrame({
             'Symbol': ['RELIANCE'],
+            'Cap': ['Large Cap'],
             'Current_Quantity': [10],
             'Average_Buy_Price': [2500.0],
             'SL': [2250.0],
@@ -64,6 +65,7 @@ class TestSaveWorkbook(unittest.TestCase):
 
         self.overall_df = pd.DataFrame({
             'Symbol': ['RELIANCE'],
+            'Cap': ['Large Cap'],
             'Total_Buy_Quantity': [10],
             'Total_Buy_Value': [25000.0],
             'Average_Buy_Price': [2500.0],

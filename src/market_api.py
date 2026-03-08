@@ -46,7 +46,7 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
     """
     import pandas as pd
 
-    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0}
+    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0}
 
     try:
         import yfinance as yf
@@ -57,7 +57,7 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
     if not symbols:
         return {}
 
-    print(f"Fetching Market Data (LTP & EMAs) from Yahoo Finance for {len(symbols)} symbols...")
+    print(f"Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for {len(symbols)} symbols...")
     symbol_ns = [sym + '.NS' for sym in symbols]
     market_data = {sym: default_data.copy() for sym in symbols}
 
@@ -85,7 +85,17 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
                     market_data[sym]['EMA11'] = round(float(valid_series.ewm(span=11, adjust=False).mean().iloc[-1]), 2)
                     market_data[sym]['EMA21'] = round(float(valid_series.ewm(span=21, adjust=False).mean().iloc[-1]), 2)
 
+        # Fetch Market Cap for each symbol individually
+        for sym, ns_sym in zip(symbols, symbol_ns):
+            try:
+                ticker = yf.Ticker(ns_sym)
+                info = ticker.info
+                market_data[sym]['Market_Cap'] = info.get('marketCap', 0) or 0
+            except Exception:
+                pass
+
     except Exception as e:
         print(f"Error fetching data from Yahoo Finance: {e}")
 
     return market_data
+

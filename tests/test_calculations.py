@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.calculations import process_grouped_trades, _get_stop_loss, calculate_portfolios
+from src.calculations import process_grouped_trades, _get_stop_loss, _classify_market_cap, calculate_portfolios
 
 
 class TestProcessGroupedTrades(unittest.TestCase):
@@ -166,7 +166,7 @@ class TestCalculatePortfolios(unittest.TestCase):
     def test_basic_portfolio(self, mock_yahoo):
         """A simple buy-only scenario should produce correct portfolio values."""
         mock_yahoo.return_value = {
-            'RELIANCE': {'LTP': 2600.0, 'EMA9': 2590.0, 'EMA10': 2585.0, 'EMA11': 2580.0, 'EMA21': 2550.0}
+            'RELIANCE': {'LTP': 2600.0, 'EMA9': 2590.0, 'EMA10': 2585.0, 'EMA11': 2580.0, 'EMA21': 2550.0, 'Market_Cap': 1_800_000_000_000}
         }
         df = pd.DataFrame({
             'Trade Date': ['2025-01-01'],
@@ -194,9 +194,12 @@ class TestCalculatePortfolios(unittest.TestCase):
         self.assertEqual(portfolio_df.iloc[0]['LTP'], 2600.0)
         self.assertIn('SL', portfolio_df.columns)
         self.assertIn('EMA21', portfolio_df.columns)
+        self.assertIn('Cap', portfolio_df.columns)
+        self.assertEqual(portfolio_df.iloc[0]['Cap'], 'Large Cap')
 
         # Overall Portfolio checks
         self.assertNotIn('EMA9', overall_df.columns)  # EMAs removed from overall
+        self.assertIn('Cap', overall_df.columns)
         self.assertIn('Unrealized_PnL', overall_df.columns)
         self.assertEqual(overall_df.iloc[0]['Unrealized_PnL'], 1000.0)  # (2600-2500)*10
 
@@ -204,7 +207,7 @@ class TestCalculatePortfolios(unittest.TestCase):
     def test_realized_pnl(self, mock_yahoo):
         """Selling shares should produce correct Realized PnL."""
         mock_yahoo.return_value = {
-            'TCS': {'LTP': 3500.0, 'EMA9': 0, 'EMA10': 0, 'EMA11': 0, 'EMA21': 0}
+            'TCS': {'LTP': 3500.0, 'EMA9': 0, 'EMA10': 0, 'EMA11': 0, 'EMA21': 0, 'Market_Cap': 500_000_000_000}
         }
         df = pd.DataFrame({
             'Trade Date': ['2025-01-01', '2025-01-05'],
@@ -234,7 +237,7 @@ class TestCalculatePortfolios(unittest.TestCase):
     def test_fully_sold_position(self, mock_yahoo):
         """A fully sold position should not appear in Current Portfolio but should be in Overall."""
         mock_yahoo.return_value = {
-            'INFY': {'LTP': 1500.0, 'EMA9': 0, 'EMA10': 0, 'EMA11': 0, 'EMA21': 0}
+            'INFY': {'LTP': 1500.0, 'EMA9': 0, 'EMA10': 0, 'EMA11': 0, 'EMA21': 0, 'Market_Cap': 200_000_000_000}
         }
         df = pd.DataFrame({
             'Trade Date': ['2025-01-01', '2025-01-05'],
@@ -260,6 +263,46 @@ class TestCalculatePortfolios(unittest.TestCase):
         # But SHOULD be in overall portfolio
         self.assertEqual(len(overall_df), 1)
         self.assertEqual(overall_df.iloc[0]['Current_Quantity'], 0)
+
+
+class TestClassifyMarketCap(unittest.TestCase):
+    """Test suite for the _classify_market_cap function."""
+
+    def setUp(self):
+        self.config = {
+            'SMALL_CAP': {'type': 'below', 'value': 347_000_000_000},
+            'LARGE_CAP': {'type': 'above', 'value': 1_050_000_000_000},
+        }
+
+    def test_large_cap(self):
+        """Market cap >= 1,05,000 Cr should be Large Cap."""
+        result = _classify_market_cap(1_800_000_000_000, self.config)
+        self.assertEqual(result, 'Large Cap')
+
+    def test_mid_cap(self):
+        """Market cap between small and large thresholds should be Mid Cap."""
+        result = _classify_market_cap(500_000_000_000, self.config)
+        self.assertEqual(result, 'Mid Cap')
+
+    def test_small_cap(self):
+        """Market cap below 34,700 Cr should be Small Cap."""
+        result = _classify_market_cap(100_000_000_000, self.config)
+        self.assertEqual(result, 'Small Cap')
+
+    def test_zero_market_cap(self):
+        """Zero market cap should return empty string."""
+        result = _classify_market_cap(0, self.config)
+        self.assertEqual(result, '')
+
+    def test_boundary_large_cap(self):
+        """Market cap exactly at large cap threshold should be Large Cap."""
+        result = _classify_market_cap(1_050_000_000_000, self.config)
+        self.assertEqual(result, 'Large Cap')
+
+    def test_default_thresholds(self):
+        """Without config, SEBI defaults should apply."""
+        result = _classify_market_cap(1_800_000_000_000, {})
+        self.assertEqual(result, 'Large Cap')
 
 
 if __name__ == '__main__':
