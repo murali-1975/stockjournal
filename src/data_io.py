@@ -93,9 +93,9 @@ def merge_and_deduplicate(master_df: pd.DataFrame | None, new_df: pd.DataFrame |
     """
     Merges existing master data with newly provided trades and removes duplicates.
 
-    Deduplication is based on an exact match of: Trade Date, Symbol,
-    Trade Type, Quantity, and Price. This prevents double-counting if
-    the same inbox file is accidentally processed twice.
+    Deduplication is based on the 'Trade ID' column, which is a unique
+    exchange-assigned identifier for each trade. This prevents double-counting
+    if the same inbox file is accidentally processed twice.
 
     Args:
         master_df: The existing Raw_Tradebook DataFrame (can be None).
@@ -112,7 +112,10 @@ def merge_and_deduplicate(master_df: pd.DataFrame | None, new_df: pd.DataFrame |
         print("Appending new trades to the master database...")
         df = pd.concat([master_df, new_df], ignore_index=True)
         before_len = len(df)
-        df = df.drop_duplicates(subset=['Trade Date', 'Symbol', 'Trade Type', 'Quantity', 'Price'])
+        if 'Trade ID' in df.columns:
+            df = df.drop_duplicates(subset=['Trade ID'])
+        else:
+            df = df.drop_duplicates()
         after_len = len(df)
         if before_len > after_len:
             print(f"Dropped {before_len - after_len} duplicate trades.")
