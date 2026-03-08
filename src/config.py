@@ -57,7 +57,8 @@ def load_config(config_file: str) -> dict:
                         try:
                             config[key] = float(numeric_part)
                         except ValueError:
-                            pass
+                            # Preserve non-numeric values as strings (e.g., file paths)
+                            config[key] = value
 
             # Second pass: evaluate percentages of TOTAL_PORTFOLIO and specific string rules
             total_portfolio = config.get('TOTAL_PORTFOLIO', 0)
