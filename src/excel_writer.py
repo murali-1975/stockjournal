@@ -73,7 +73,7 @@ def save_workbook(
 
             _apply_number_format(
                 writer, portfolio_df, 'Current_Portfolio',
-                columns=['Average_Buy_Price', 'SL', 'Invested_Value', 'LTP',
+                columns=['Average_Buy_Price', 'SL', 'LTP_SL_Diff', 'Invested_Value', 'LTP',
                          'EMA9', 'EMA10', 'EMA11', 'EMA21',
                          'Current_Value', 'Unrealized_PnL'],
                 number_format=inr_format
@@ -87,10 +87,15 @@ def save_workbook(
                 number_format=inr_format
             )
 
-            # --- Apply percentage formatting ---
             _apply_number_format(
                 writer, overall_df, 'Overall_Portfolio',
                 columns=['Total_PnL_Percentage'],
+                number_format='0.00%'
+            )
+
+            _apply_number_format(
+                writer, portfolio_df, 'Current_Portfolio',
+                columns=['LTP_SL_Diff_Pct'],
                 number_format='0.00%'
             )
 

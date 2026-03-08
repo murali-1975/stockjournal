@@ -379,8 +379,17 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     # --- Apply Stop Loss ---
     portfolio_df['SL'] = portfolio_df.apply(lambda row: _get_stop_loss(row, grouped_df), axis=1)
 
+    # --- LTP vs SL Difference ---
+    portfolio_df['LTP_SL_Diff'] = (portfolio_df['LTP'] - portfolio_df['SL']).round(2)
+    portfolio_df['LTP_SL_Diff_Pct'] = np.where(
+        portfolio_df['LTP'] > 0,
+        ((portfolio_df['LTP'] - portfolio_df['SL']) / portfolio_df['LTP']),
+        0
+    )
+
     # Reorder Current Portfolio columns
-    port_cols = ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'SL', 'Invested_Value', 'LTP',
+    port_cols = ['Symbol', 'Cap', 'Latest_Tranche', 'Current_Quantity', 'Average_Buy_Price', 'SL',
+                 'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
                  'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL']
     portfolio_df = portfolio_df[port_cols]
 
