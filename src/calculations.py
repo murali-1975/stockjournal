@@ -232,7 +232,7 @@ def _classify_market_cap(market_cap: float, config: dict) -> str:
         return 'Mid Cap'
 
 
-def _get_split_info(symbol: str, first_buy_date, market_data: dict) -> str:
+def _get_split_info(symbol: str, first_buy_date, market_data: dict, applied_splits: dict) -> tuple[str, str]:
     """
     Checks if a stock had any splits/bonuses after the first buy date.
 
@@ -240,24 +240,28 @@ def _get_split_info(symbol: str, first_buy_date, market_data: dict) -> str:
         symbol:         The stock symbol.
         first_buy_date: The earliest buy date for this stock (datetime or NaT).
         market_data:    Dict from fetch_market_data_from_yahoo with 'Splits' key.
+        applied_splits: Dict mapping symbols to lists of applied split dates.
 
     Returns:
-        A string describing the split(s), e.g. '2:1 Split on 2024-06-22',
-        or '' if no relevant splits found.
+        A tuple: (split_description_string, adj_required_string).
+        e.g. ('2:1 Split on 2024-06-22', 'Yes')
     """
     sym_data = market_data.get(symbol, {})
     splits = sym_data.get('Splits')
     if splits is None or (hasattr(splits, 'empty') and splits.empty):
-        return ''
+        return '', 'No'
 
     if pd.isna(first_buy_date):
-        return ''
+        return '', 'No'
 
     # Normalize first_buy_date to timezone-naive for comparison
     if hasattr(first_buy_date, 'tz') and first_buy_date.tz is not None:
         first_buy_date = first_buy_date.tz_localize(None)
 
     relevant = []
+    adj_required = 'No'
+    applied_for_sym = applied_splits.get(symbol, [])
+
     for split_date, ratio in splits.items():
         # Normalize split_date to timezone-naive
         sd = split_date
@@ -265,16 +269,20 @@ def _get_split_info(symbol: str, first_buy_date, market_data: dict) -> str:
             sd = sd.tz_localize(None)
 
         if sd >= first_buy_date:
+            date_str = sd.strftime('%Y-%m-%d')
             ratio_float = float(ratio)
             if ratio_float == int(ratio_float):
-                desc = f"{int(ratio_float)}:1 Split on {sd.strftime('%Y-%m-%d')}"
+                desc = f"{int(ratio_float)}:1 Split on {date_str}"
             else:
                 # Express as fraction for bonus, e.g. 1.5 → 3:2
                 num = int(ratio_float * 2)
-                desc = f"{num}:2 Bonus on {sd.strftime('%Y-%m-%d')}"
+                desc = f"{num}:2 Bonus on {date_str}"
             relevant.append(desc)
+            
+            if date_str not in applied_for_sym:
+                adj_required = 'Yes'
 
-    return ' | '.join(relevant)
+    return ' | '.join(relevant), adj_required
 
 
 def _get_latest_tranche_cheat(symbol: str, grouped_df: pd.DataFrame) -> str:
@@ -437,13 +445,26 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     overall_df['Holding_Period'] = (overall_df['Holding_End'] - overall_df['First_Buy_Date']).dt.days
     overall_df['Holding_Period'] = overall_df['Holding_Period'].fillna(0).astype(int)
 
+    # --- Load applied splits to correctly set Adj_Required flag ---
+    import json
+    import os
+    applied_splits = {}
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    splits_path = os.path.join(base_dir, 'applied_splits.json')
+    if os.path.exists(splits_path):
+        try:
+            with open(splits_path, 'r', encoding='utf-8') as f:
+                applied_splits = json.load(f)
+        except Exception:
+            pass
+
     # --- Split/Bonus Detection ---
-    overall_df['Split_Info'] = overall_df.apply(
-        lambda row: _get_split_info(row['Symbol'], row.get('First_Buy_Date'), market_data), axis=1
-    )
-    overall_df['Adj_Required'] = overall_df['Split_Info'].apply(
-        lambda x: 'Yes' if x and x != '' else 'No'
-    )
+    def assign_split_info(row):
+        return _get_split_info(row['Symbol'], row.get('First_Buy_Date'), market_data, applied_splits)
+
+    split_results = overall_df.apply(assign_split_info, axis=1)
+    overall_df['Split_Info'] = [res[0] for res in split_results]
+    overall_df['Adj_Required'] = [res[1] for res in split_results]
 
     # --- Format and Order Columns for Overall Portfolio ---
     cols_order = [
