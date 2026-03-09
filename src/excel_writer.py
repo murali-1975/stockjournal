@@ -21,6 +21,8 @@ import os
 
 import pandas as pd
 
+from .dashboard import create_dashboard
+
 
 def save_workbook(
     df: pd.DataFrame,
@@ -98,6 +100,9 @@ def save_workbook(
                 columns=['LTP_SL_Diff_Pct'],
                 number_format='0.00%'
             )
+
+            # --- Create Dashboard with charts ---
+            create_dashboard(writer.book, portfolio_df, overall_df)
 
         print("Done!")
     except Exception as e:
