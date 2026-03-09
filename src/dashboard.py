@@ -8,12 +8,13 @@ ready for the user to chart manually in Excel.
 Tables included:
     1. Portfolio KPIs
     2. Cap-wise Allocation
-    3. Sector-wise Allocation
-    4. Top 5 Gainers / Bottom 5 Losers
-    5. Realized vs Unrealized PnL by Cap
-    6. Stocks Nearest to Stop Loss
-    7. Tranche Distribution
-    8. Holding Period Distribution
+    3. Core & Satellite Distribution
+    4. Sector-wise Allocation
+    5. Top 5 Gainers / Bottom 5 Losers
+    6. Realized vs Unrealized PnL by Cap
+    7. Stocks Nearest to Stop Loss
+    8. Tranche Distribution
+    9. Holding Period Distribution
 """
 
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -82,6 +83,8 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame) -
 
     rrow = 3
     rrow = _write_cap_allocation(ws, portfolio_df, rrow)
+    rrow += 2
+    rrow = _write_classification_allocation(ws, portfolio_df, rrow)
     rrow += 2
     rrow = _write_sector_allocation(ws, portfolio_df, rrow)
     rrow += 2
@@ -253,6 +256,37 @@ def _write_cap_allocation(ws, df, row):
         row += 1
 
     # Total row
+    _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 9, round(total, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 10, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
+    row += 1
+
+    return row
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Table 5: Core & Satellite Distribution (RIGHT SIDE)
+# ═══════════════════════════════════════════════════════════════════
+
+def _write_classification_allocation(ws, df, row):
+    """Core & Satellite distribution. Returns next free row."""
+    row = _section_title(ws, row, 8, 'Core & Satellite Distribution')
+    row = _styled_header(ws, row, 8, ['Classification', 'Invested (₹)', '% of Total'])
+
+    if 'TF_Classification' not in df.columns or 'Invested_Value' not in df.columns:
+        _data_cell(ws, row, 8, 'No data')
+        return row + 1
+
+    grouped = df.groupby('TF_Classification')['Invested_Value'].sum().sort_values(ascending=False)
+    grouped = grouped[grouped.index != '']
+    total = grouped.sum()
+
+    for label, val in grouped.items():
+        _data_cell(ws, row, 8, str(label), font=LABEL_FONT)
+        _data_cell(ws, row, 9, round(val, 2), fmt=INR_FMT)
+        _data_cell(ws, row, 10, val / total if total > 0 else 0, fmt=PCT_FMT)
+        row += 1
+
     _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
     _data_cell(ws, row, 9, round(total, 2), fmt=INR_FMT, font=LABEL_FONT)
     _data_cell(ws, row, 10, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
