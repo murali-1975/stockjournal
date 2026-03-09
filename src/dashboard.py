@@ -76,6 +76,8 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame) -
     row = _write_top_bottom_table(ws, portfolio_df, row)
     row += 2
     row = _write_nearest_sl_table(ws, portfolio_df, row)
+    row += 2
+    row = _write_corporate_actions(ws, portfolio_df, overall_df, row)
 
     # ══════════════════════════════════════════════════════════════════
     #  RIGHT SIDE (Columns H-K) — Allocation & Distribution tables
@@ -424,6 +426,39 @@ def _write_holding_distribution(ws, df, row):
         _data_cell(ws, row, 8, label, font=LABEL_FONT)
         _data_cell(ws, row, 9, cnt)
         _data_cell(ws, row, 10, cnt / total if total > 0 else 0, fmt=PCT_FMT)
+        row += 1
+
+    return row
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Table 10: Corporate Actions (LEFT SIDE)
+# ═══════════════════════════════════════════════════════════════════
+
+def _write_corporate_actions(ws, portfolio_df, overall_df, row):
+    """Writes stocks with splits/bonuses since purchase. Returns next free row."""
+    row = _section_title(ws, row, 1, '🔔 Corporate Actions (Splits / Bonus)')
+    row = _styled_header(ws, row, 1, ['Symbol', 'Split / Bonus Details', 'Adj Required'])
+
+    # Combine both portfolios and filter for rows with split info
+    all_stocks = pd.concat([portfolio_df, overall_df]).drop_duplicates(subset='Symbol')
+
+    if 'Split_Info' not in all_stocks.columns or len(all_stocks) == 0:
+        _data_cell(ws, row, 1, 'No corporate actions detected')
+        return row + 1
+
+    actions = all_stocks[all_stocks['Split_Info'] != ''].sort_values('Symbol')
+
+    if len(actions) == 0:
+        _data_cell(ws, row, 1, 'No splits/bonuses detected since purchase')
+        return row + 1
+
+    for _, s in actions.iterrows():
+        _data_cell(ws, row, 1, s.get('Symbol', ''), font=LABEL_FONT)
+        _data_cell(ws, row, 2, s.get('Split_Info', ''))
+        adj = s.get('Adj_Required', 'No')
+        _data_cell(ws, row, 3, adj,
+                   font=RED_FONT if adj == 'Yes' else None)
         row += 1
 
     return row

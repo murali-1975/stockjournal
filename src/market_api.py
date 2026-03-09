@@ -85,12 +85,17 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
                     market_data[sym]['EMA11'] = round(float(valid_series.ewm(span=11, adjust=False).mean().iloc[-1]), 2)
                     market_data[sym]['EMA21'] = round(float(valid_series.ewm(span=21, adjust=False).mean().iloc[-1]), 2)
 
-        # Fetch Market Cap for each symbol individually
+        # Fetch Market Cap and Splits for each symbol individually
         for sym, ns_sym in zip(symbols, symbol_ns):
             try:
                 ticker = yf.Ticker(ns_sym)
                 info = ticker.info
                 market_data[sym]['Market_Cap'] = info.get('marketCap', 0) or 0
+
+                # Fetch split/bonus history
+                splits = ticker.splits
+                if splits is not None and not splits.empty:
+                    market_data[sym]['Splits'] = splits
             except Exception:
                 pass
 

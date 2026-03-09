@@ -232,6 +232,51 @@ def _classify_market_cap(market_cap: float, config: dict) -> str:
         return 'Mid Cap'
 
 
+def _get_split_info(symbol: str, first_buy_date, market_data: dict) -> str:
+    """
+    Checks if a stock had any splits/bonuses after the first buy date.
+
+    Args:
+        symbol:         The stock symbol.
+        first_buy_date: The earliest buy date for this stock (datetime or NaT).
+        market_data:    Dict from fetch_market_data_from_yahoo with 'Splits' key.
+
+    Returns:
+        A string describing the split(s), e.g. '2:1 Split on 2024-06-22',
+        or '' if no relevant splits found.
+    """
+    sym_data = market_data.get(symbol, {})
+    splits = sym_data.get('Splits')
+    if splits is None or (hasattr(splits, 'empty') and splits.empty):
+        return ''
+
+    if pd.isna(first_buy_date):
+        return ''
+
+    # Normalize first_buy_date to timezone-naive for comparison
+    if hasattr(first_buy_date, 'tz') and first_buy_date.tz is not None:
+        first_buy_date = first_buy_date.tz_localize(None)
+
+    relevant = []
+    for split_date, ratio in splits.items():
+        # Normalize split_date to timezone-naive
+        sd = split_date
+        if hasattr(sd, 'tz') and sd.tz is not None:
+            sd = sd.tz_localize(None)
+
+        if sd >= first_buy_date:
+            ratio_float = float(ratio)
+            if ratio_float == int(ratio_float):
+                desc = f"{int(ratio_float)}:1 Split on {sd.strftime('%Y-%m-%d')}"
+            else:
+                # Express as fraction for bonus, e.g. 1.5 → 3:2
+                num = int(ratio_float * 2)
+                desc = f"{num}:2 Bonus on {sd.strftime('%Y-%m-%d')}"
+            relevant.append(desc)
+
+    return ' | '.join(relevant)
+
+
 def _get_latest_tranche_cheat(symbol: str, grouped_df: pd.DataFrame) -> str:
     """
     Returns the latest (highest-numbered) Tranche or Cheat label for a symbol.
@@ -392,6 +437,14 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     overall_df['Holding_Period'] = (overall_df['Holding_End'] - overall_df['First_Buy_Date']).dt.days
     overall_df['Holding_Period'] = overall_df['Holding_Period'].fillna(0).astype(int)
 
+    # --- Split/Bonus Detection ---
+    overall_df['Split_Info'] = overall_df.apply(
+        lambda row: _get_split_info(row['Symbol'], row.get('First_Buy_Date'), market_data), axis=1
+    )
+    overall_df['Adj_Required'] = overall_df['Split_Info'].apply(
+        lambda x: 'Yes' if x and x != '' else 'No'
+    )
+
     # --- Format and Order Columns for Overall Portfolio ---
     cols_order = [
         'Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
@@ -399,7 +452,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         'Total_Sell_Quantity', 'Total_Sell_Value', 'Average_Sell_Price',
         'Current_Quantity', 'Invested_Value', 'LTP', 'Current_Value',
         'Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage',
-        'Holding_Period',
+        'Holding_Period', 'Split_Info', 'Adj_Required',
         'EMA9', 'EMA10', 'EMA11', 'EMA21'
     ]
     overall_df = overall_df[cols_order].sort_values(by='Symbol')
@@ -408,7 +461,8 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     portfolio_df = overall_df[overall_df['Current_Quantity'] > 0][
         ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
          'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
-         'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL', 'Holding_Period']
+         'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
+         'Holding_Period', 'Split_Info', 'Adj_Required']
     ].copy()
 
     # --- Apply Stop Loss ---
@@ -426,7 +480,8 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     port_cols = ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
                  'Current_Quantity', 'Average_Buy_Price', 'SL',
                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
-                 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL', 'Holding_Period']
+                 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
+                 'Holding_Period', 'Split_Info', 'Adj_Required']
     portfolio_df = portfolio_df[port_cols]
 
     # Remove EMA columns from Overall Portfolio (only needed in Current Portfolio)
