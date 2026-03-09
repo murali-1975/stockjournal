@@ -42,6 +42,7 @@ from src.config import load_config
 from src.data_io import load_data, load_master_database, merge_and_deduplicate
 from src.calculations import process_grouped_trades, calculate_portfolios
 from src.excel_writer import save_workbook
+from src.corporate_actions import process_splits
 
 
 def run_tests() -> bool:
@@ -99,6 +100,12 @@ def main():
     df = merge_and_deduplicate(master_df, new_df)
     if df is None:
         return
+
+    # Step 4.5: Check for auto-adjustments (Stock Splits/Bonuses)
+    if not df.empty:
+        was_modified, df = process_splits(df, base_dir=current_dir)
+        if was_modified:
+            print("Historical trades adjusted in-memory. Will be saved to Excel.")
 
     # Step 5: Process grouped trades with Tranche/Cheat labels
     print("Processing data...")
