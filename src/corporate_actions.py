@@ -37,8 +37,12 @@ def process_splits(df: pd.DataFrame, base_dir: str = '.') -> tuple[bool, pd.Data
         except Exception:
             pass
 
+    # Copy df to avoid modifying original until we decide to
+    search_df = df.copy()
+    search_df['Trade Date'] = pd.to_datetime(search_df['Trade Date'])
+
     # Find the earliest buy date for each symbol
-    buy_df = df[df['Trade Type'].str.lower() == 'buy']
+    buy_df = search_df[search_df['Trade Type'].str.lower() == 'buy']
     first_buys = buy_df.groupby('Symbol')['Trade Date'].min().to_dict()
 
     pending_actions = []
@@ -96,7 +100,8 @@ def process_splits(df: pd.DataFrame, base_dir: str = '.') -> tuple[bool, pd.Data
                             'desc': action_desc
                         })
                         
-        except Exception:
+        except Exception as e:
+            # print(f"Error fetching splits for {sym}: {e}")
             pass
 
     if not pending_actions:
