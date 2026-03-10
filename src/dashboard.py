@@ -90,6 +90,8 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame) -
     rrow += 2
     rrow = _write_sector_allocation(ws, portfolio_df, rrow)
     rrow += 2
+    rrow = _write_core_satellite_sector_allocation(ws, portfolio_df, rrow)
+    rrow += 2
     rrow = _write_pnl_by_cap(ws, overall_df, rrow)
     rrow += 2
     rrow = _write_tranche_distribution(ws, portfolio_df, rrow)
@@ -333,6 +335,60 @@ def _write_sector_allocation(ws, df, row):
     row += 1
 
     return row
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Table 5b: Core vs Satellite Sector Allocation (RIGHT SIDE)
+# ═══════════════════════════════════════════════════════════════════
+
+def _write_core_satellite_sector_allocation(ws, df, row):
+    """Sector allocation split by Core and Satellite. Returns next free row."""
+    row = _section_title(ws, row, 8, 'Sector Allocation (Core vs Satellite)')
+    row = _styled_header(ws, row, 8, ['Sector', 'Core (₹)', 'Satellite (₹)', 'Total (₹)'])
+
+    if 'TF_Sector' not in df.columns or 'TF_Classification' not in df.columns or 'Invested_Value' not in df.columns:
+        _data_cell(ws, row, 8, 'No data')
+        return row + 1
+
+    valid_df = df[df['TF_Sector'] != ''].copy()
+    if valid_df.empty:
+        _data_cell(ws, row, 8, 'No sector data available')
+        return row + 1
+
+    core_mask = valid_df['TF_Classification'].str.contains('Core', case=False, na=False)
+    sat_mask = valid_df['TF_Classification'].str.contains('Satellite', case=False, na=False)
+
+    core_df = valid_df[core_mask]
+    sat_df = valid_df[sat_mask]
+
+    core_grouped = core_df.groupby('TF_Sector')['Invested_Value'].sum()
+    sat_grouped = sat_df.groupby('TF_Sector')['Invested_Value'].sum()
+
+    combined = pd.DataFrame({'Core': core_grouped, 'Satellite': sat_grouped}).fillna(0)
+    combined['Total'] = combined['Core'] + combined['Satellite']
+    combined = combined[combined['Total'] > 0]
+    combined = combined.sort_values(by='Total', ascending=False)
+
+    total_core = combined['Core'].sum()
+    total_sat = combined['Satellite'].sum()
+    total_all = combined['Total'].sum()
+
+    for sector, row_data in combined.iterrows():
+        _data_cell(ws, row, 8, str(sector), font=LABEL_FONT)
+        _data_cell(ws, row, 9, round(row_data['Core'], 2), fmt=INR_FMT)
+        _data_cell(ws, row, 10, round(row_data['Satellite'], 2), fmt=INR_FMT)
+        _data_cell(ws, row, 11, round(row_data['Total'], 2), fmt=INR_FMT)
+        row += 1
+
+    _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 9, round(total_core, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 10, round(total_sat, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 11, round(total_all, 2), fmt=INR_FMT, font=LABEL_FONT)
+    row += 1
+
+    return row
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════
