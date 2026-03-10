@@ -148,6 +148,11 @@ def _write_kpi_table(ws, portfolio_df, overall_df, row):
     tp = tr + tu
     pp = tp / ti if ti > 0 else 0
 
+    core_ti = portfolio_df[portfolio_df['TF_Classification'].str.contains('Core', case=False, na=False)]['Invested_Value'].sum() if 'TF_Classification' in portfolio_df.columns else 0
+    sat_ti = portfolio_df[portfolio_df['TF_Classification'].str.contains('Satellite', case=False, na=False)]['Invested_Value'].sum() if 'TF_Classification' in portfolio_df.columns else 0
+    core_pct = core_ti / ti if ti > 0 else 0
+    sat_pct = sat_ti / ti if ti > 0 else 0
+
     kpis = [
         ('Total Invested Value', ti, INR_FMT),
         ('Total Current Value', tc, INR_FMT),
@@ -155,6 +160,8 @@ def _write_kpi_table(ws, portfolio_df, overall_df, row):
         ('Realized PnL', tr, INR_FMT),
         ('Combined PnL', tp, INR_FMT),
         ('Combined PnL %', pp, PCT_FMT),
+        ('Core Allocation (%)', core_pct, PCT_FMT),
+        ('Satellite Allocation (%)', sat_pct, PCT_FMT),
         ('Active Holdings', len(portfolio_df), '0'),
         ('Total Stocks Traded', len(overall_df), '0'),
     ]
