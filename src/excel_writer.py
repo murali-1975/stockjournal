@@ -102,7 +102,7 @@ def save_workbook(
             )
 
             # --- Create Dashboard with charts ---
-            create_dashboard(writer.book, portfolio_df, overall_df)
+            create_dashboard(writer.book, portfolio_df, overall_df, df)
 
         print("Done!")
     except Exception as e:

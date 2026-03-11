@@ -39,7 +39,7 @@ INR_FMT = '[$₹-en-IN] #,##0.00'
 PCT_FMT = '0.00%'
 
 
-def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame) -> None:
+def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, raw_df: pd.DataFrame = None) -> None:
     """
     Creates (or replaces) a 'Dashboard' sheet with pre-computed summary tables.
 
@@ -65,6 +65,17 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame) -
     ws['A1'].value = '📊 Portfolio Dashboard'
     ws['A1'].font = Font(name='Calibri', bold=True, size=18, color='2F5496')
     ws['A1'].alignment = Alignment(horizontal='center')
+
+    if raw_df is not None and not raw_df.empty and 'Trade Date' in raw_df.columns:
+        try:
+            max_date = pd.to_datetime(raw_df['Trade Date']).max()
+            if pd.notna(max_date):
+                ws.merge_cells('H1:K1')
+                ws['H1'].value = f'🕒 Last Transacted Date: {max_date.strftime("%d %b %Y")}'
+                ws['H1'].font = Font(name='Calibri', italic=True, size=12, color='595959', bold=True)
+                ws['H1'].alignment = Alignment(horizontal='right')
+        except Exception:
+            pass
 
     # ══════════════════════════════════════════════════════════════════
     #  LEFT SIDE (Columns A-F) — KPIs, Gainers/Losers, Risk Table
