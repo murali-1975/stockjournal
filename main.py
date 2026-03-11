@@ -38,6 +38,10 @@ File Structure:
 
 import os
 import sys
+import warnings
+
+# Suppress harmless openpyxl warning about unsupported Data Validation extensions
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 from src.config import load_config
 from src.data_io import load_data, load_master_database, merge_and_deduplicate
