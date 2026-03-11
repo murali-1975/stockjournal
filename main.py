@@ -5,8 +5,9 @@ Stock Journal - Main Orchestrator
 Entry point for the Stock Journal trade processing engine.
 
 Usage:
-    python main.py           Run the full trade processing pipeline
-    python main.py --test    Run all tests before processing
+    python main.py                   Run the full trade processing pipeline once
+    python main.py --test            Run all tests before processing
+    python main.py --watch <mins>    Run in a continuous loop, updating LTP/EMA every N minutes
 
 This script:
     1. Loads the configuration from `input.cfg`.
@@ -130,4 +131,36 @@ if __name__ == "__main__":
             print("\nTests complete. Run without --test to process trades.")
             sys.exit(0)
 
-    main()
+    if '--watch' in sys.argv:
+        try:
+            idx = sys.argv.index('--watch')
+            interval_minutes = float(sys.argv[idx + 1])
+        except (ValueError, IndexError):
+            print("Usage: python main.py --watch <minutes>")
+            sys.exit(1)
+
+        import time
+        from datetime import datetime
+        print(f"\n👀 Starting Watch Mode: Updating every {interval_minutes} minutes.")
+        print("Press Ctrl+C to stop.\n")
+
+        while True:
+            try:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting update cycle...")
+                main()
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Update complete. Waiting {interval_minutes} minutes...")
+            except PermissionError as e:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ Permission Error: Could not save the Excel file. Is it open? Please close it to allow updates.")
+            except Exception as e:
+                import traceback
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Error during update: {e}")
+                traceback.print_exc()
+
+            try:
+                time.sleep(interval_minutes * 60)
+            except KeyboardInterrupt:
+                print("\nWatch mode stopped.")
+                sys.exit(0)
+    else:
+        main()
+
