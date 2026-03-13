@@ -95,6 +95,13 @@ def load_config(config_file: str) -> dict:
                         # Examples: "Below ₹34,700 Cr", "Above ₹1,05,000 Cr",
                         #           "Between ₹34,700 Cr and ₹1,05,000 Cr"
                         config[key] = _parse_cap_threshold(value)
+                    elif key in ('INVEST_START_DATE', 'INVEST_START'):
+                        # Preserve as string, e.g. '01-09-2025'
+                        config['INVEST_START_DATE'] = value.strip()
+                    elif key == 'BENCHMARK_INDEX':
+                        # Parse comma-separated list of benchmarks
+                        # e.g. "NIFTY_50, CNXMIDCAP" -> ['NIFTY_50', 'CNXMIDCAP']
+                        config[key] = [b.strip() for b in value.split(',')]
     except FileNotFoundError:
         print(f"Config file {config_file} not found. Skipping tranche logic.")
 

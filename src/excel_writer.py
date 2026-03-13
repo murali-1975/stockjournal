@@ -29,7 +29,8 @@ def save_workbook(
     grouped_df: pd.DataFrame,
     portfolio_df: pd.DataFrame,
     overall_df: pd.DataFrame,
-    output_file: str
+    output_file: str,
+    benchmark_returns: dict = None
 ) -> None:
     """
     Saves all computed DataFrames to the master Excel workbook.
@@ -101,8 +102,13 @@ def save_workbook(
                 number_format='0.00%'
             )
 
+            # --- Auto-fit columns and freeze panes for readability ---
+            for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
+                if sheet in writer.sheets:
+                    _auto_fit_columns_and_freeze(writer, sheet)
+
             # --- Create Dashboard with charts ---
-            create_dashboard(writer.book, portfolio_df, overall_df, df)
+            create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns)
 
         print("Done!")
     except Exception as e:
@@ -154,3 +160,70 @@ def _apply_number_format(
         if col_name in columns:
             for row in range(2, len(df) + 2):
                 worksheet.cell(row=row, column=col_idx).number_format = number_format
+
+
+def _auto_fit_columns_and_freeze(writer, sheet_name: str) -> None:
+    """
+    Adjusts the column widths dynamically based on the maximum string length
+    in each column (including the header) and freezes the top row.
+    Also formats the header row with bold text, borders, and centering.
+
+    Args:
+        writer:     The active pd.ExcelWriter instance.
+        sheet_name: The target worksheet name.
+    """
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+    worksheet = writer.sheets[sheet_name]
+    
+    # Freeze the top header row
+    worksheet.freeze_panes = 'A2'
+
+    # Define Header Styles
+    header_font = Font(bold=True, color='FFFFFF')
+    header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    header_fill = PatternFill(start_color='2F5496', end_color='2F5496', fill_type='solid')
+    thin_border = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+
+    for col in worksheet.columns:
+        max_length = 0
+        column = col[0].column_letter  # Get the column name (e.g., 'A')
+        
+        # Apply style to the first cell (header) in the column
+        header_cell = col[0]
+        header_cell.font = header_font
+        header_cell.alignment = header_alignment
+        header_cell.border = thin_border
+        header_cell.fill = header_fill
+
+        for cell in col:
+            # Apply border to all data cells in the populated range
+            if 1 < cell.row <= worksheet.max_row:
+                cell.border = thin_border
+                
+            try:
+                # Calculate length of the string representation
+                if cell.value is not None:
+                    if cell.number_format and ('%' in cell.number_format or '₹' in cell.number_format):
+                        # Give extra padding for formatted numbers (currency symbols, commas, decimals)
+                        length = len(str(cell.value)) + 5
+                    else:
+                        length = len(str(cell.value))
+                    
+                    if length > max_length:
+                        max_length = length
+            except:
+                pass
+        
+        # Set a slightly padded width, bound between a min and max width
+        adjusted_width = min(max_length + 2, 40)
+        # Ensure a minimum width so headers aren't totally squished if empty
+        adjusted_width = max(adjusted_width, 10)
+        
+        worksheet.column_dimensions[column].width = adjusted_width
+

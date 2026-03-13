@@ -39,7 +39,7 @@ INR_FMT = '[$₹-en-IN] #,##0.00'
 PCT_FMT = '0.00%'
 
 
-def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, raw_df: pd.DataFrame = None) -> None:
+def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, raw_df: pd.DataFrame = None, benchmark_returns: dict = None) -> None:
     """
     Creates (or replaces) a 'Dashboard' sheet with pre-computed summary tables.
 
@@ -54,14 +54,14 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     ws = wb.create_sheet('Dashboard', 0)
 
     # Column widths
-    widths = {'A': 24, 'B': 18, 'C': 18, 'D': 18, 'E': 18, 'F': 18,
-              'G': 4,  # spacer
-              'H': 24, 'I': 18, 'J': 18, 'K': 18}
+    widths = {'A': 24, 'B': 18, 'C': 18, 'D': 18, 'E': 18, 'F': 18, 'G': 18,
+              'H': 4,  # spacer
+              'I': 24, 'J': 18, 'K': 18, 'L': 18}
     for col, w in widths.items():
         ws.column_dimensions[col].width = w
 
     # ── Title ────────────────────────────────────────────────────────
-    ws.merge_cells('A1:F1')
+    ws.merge_cells('A1:G1')
     ws['A1'].value = '📊 Portfolio Dashboard'
     ws['A1'].font = Font(name='Calibri', bold=True, size=18, color='2F5496')
     ws['A1'].alignment = Alignment(horizontal='center')
@@ -70,10 +70,10 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
         try:
             max_date = pd.to_datetime(raw_df['Trade Date']).max()
             if pd.notna(max_date):
-                ws.merge_cells('H1:K1')
-                ws['H1'].value = f'🕒 Last Transacted Date: {max_date.strftime("%d %b %Y")}'
-                ws['H1'].font = Font(name='Calibri', italic=True, size=12, color='595959', bold=True)
-                ws['H1'].alignment = Alignment(horizontal='right')
+                ws.merge_cells('I1:L1')
+                ws['I1'].value = f'🕒 Last Transacted Date: {max_date.strftime("%d %b %Y")}'
+                ws['I1'].font = Font(name='Calibri', italic=True, size=12, color='595959', bold=True)
+                ws['I1'].alignment = Alignment(horizontal='right')
         except Exception:
             pass
 
@@ -95,6 +95,10 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     # ══════════════════════════════════════════════════════════════════
 
     rrow = 3
+    if benchmark_returns:
+        rrow = _write_benchmark_returns_table(ws, benchmark_returns, rrow)
+        rrow += 2
+
     rrow = _write_cap_allocation(ws, portfolio_df, rrow)
     rrow += 2
     rrow = _write_classification_allocation(ws, portfolio_df, rrow)
@@ -108,6 +112,7 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     rrow = _write_tranche_distribution(ws, portfolio_df, rrow)
     rrow += 2
     rrow = _write_holding_distribution(ws, portfolio_df, rrow)
+    rrow += 2
 
     print("Dashboard sheet created.")
 
@@ -197,7 +202,7 @@ def _write_kpi_table(ws, portfolio_df, overall_df, row):
 def _write_top_bottom_table(ws, df, row):
     """Writes top gainers and bottom losers. Returns next free row."""
     row = _section_title(ws, row, 1, 'Top 5 Gainers / Bottom 5 Losers')
-    row = _styled_header(ws, row, 1, ['Symbol', 'Invested (₹)', 'Current (₹)', 'PnL (₹)', 'PnL %'])
+    row = _styled_header(ws, row, 1, ['Symbol', 'Classification', 'Invested (₹)', 'Current (₹)', 'PnL (₹)', 'PnL %'])
 
     if 'Unrealized_PnL' not in df.columns or len(df) == 0:
         _data_cell(ws, row, 1, 'No data')
@@ -210,16 +215,17 @@ def _write_top_bottom_table(ws, df, row):
 
     for _, s in combined.iterrows():
         _data_cell(ws, row, 1, s.get('Symbol', ''), font=LABEL_FONT)
-        _data_cell(ws, row, 2, s.get('Invested_Value', 0), fmt=INR_FMT)
-        _data_cell(ws, row, 3, s.get('Current_Value', 0), fmt=INR_FMT)
+        _data_cell(ws, row, 2, s.get('TF_Classification', ''))
+        _data_cell(ws, row, 3, s.get('Invested_Value', 0), fmt=INR_FMT)
+        _data_cell(ws, row, 4, s.get('Current_Value', 0), fmt=INR_FMT)
 
         pnl = s.get('Unrealized_PnL', 0)
         pnl_font = GREEN_FONT if pnl > 0 else RED_FONT if pnl < 0 else None
-        _data_cell(ws, row, 4, pnl, fmt=INR_FMT, font=pnl_font)
+        _data_cell(ws, row, 5, pnl, fmt=INR_FMT, font=pnl_font)
 
         inv = s.get('Invested_Value', 0)
         pct = pnl / inv if inv > 0 else 0
-        _data_cell(ws, row, 5, pct, fmt=PCT_FMT, font=pnl_font)
+        _data_cell(ws, row, 6, pct, fmt=PCT_FMT, font=pnl_font)
         row += 1
 
     return row
@@ -232,15 +238,15 @@ def _write_top_bottom_table(ws, df, row):
 def _write_nearest_sl_table(ws, df, row):
     """Writes stocks closest to SL. Returns next free row."""
     row = _section_title(ws, row, 1, '⚠️ Stocks Nearest to Stop Loss')
-    row = _styled_header(ws, row, 1, ['Symbol', 'LTP', 'SL', 'Diff (₹)', 'Diff (%)', 'Tranche'])
+    row = _styled_header(ws, row, 1, ['Symbol', 'Classification', 'LTP', 'SL', 'Diff (₹)', 'Diff (%)', 'Tranche'])
 
     if 'LTP_SL_Diff_Pct' not in df.columns or len(df) == 0:
         _data_cell(ws, row, 1, 'No data')
         return row + 1
 
     nearest = df.nsmallest(10, 'LTP_SL_Diff_Pct')
-    col_keys = ['Symbol', 'LTP', 'SL', 'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Latest_Tranche']
-    formats = [None, INR_FMT, INR_FMT, INR_FMT, PCT_FMT, None]
+    col_keys = ['Symbol', 'TF_Classification', 'LTP', 'SL', 'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Latest_Tranche']
+    formats = [None, None, INR_FMT, INR_FMT, INR_FMT, PCT_FMT, None]
 
     for _, s in nearest.iterrows():
         for ci, (key, fmt) in enumerate(zip(col_keys, formats), 1):
@@ -255,32 +261,71 @@ def _write_nearest_sl_table(ws, df, row):
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  Table 4: Benchmark Returns
+# ═══════════════════════════════════════════════════════════════════
+
+def _write_benchmark_returns_table(ws, benchmark_returns: dict, row: int):
+    """Writes the Nifty Benchmark Returns table. Returns next free row."""
+    if not benchmark_returns:
+        return row
+        
+    row = _section_title(ws, row, 9, '📈 Benchmark Returns (Since Invest Start)')
+    row = _styled_header(ws, row, 9, ['Index Tracker (ETF)', 'Start Price (₹)', 'LTP (₹)', 'Return %'])
+    
+    for name, data in benchmark_returns.items():
+        _data_cell(ws, row, 9, name, font=LABEL_FONT)
+        _data_cell(ws, row, 10, data.get('Start_Price', 0), fmt=INR_FMT)
+        _data_cell(ws, row, 11, data.get('LTP', 0), fmt=INR_FMT)
+        
+        ret = data.get('Return_Pct', 0)
+        pnl_font = GREEN_FONT if ret > 0 else RED_FONT if ret < 0 else None
+        _data_cell(ws, row, 12, ret, fmt=PCT_FMT, font=pnl_font)
+        row += 1
+        
+    return row
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  Table 4: Cap-wise Allocation (RIGHT SIDE)
 # ═══════════════════════════════════════════════════════════════════
 
 def _write_cap_allocation(ws, df, row):
     """Cap-wise allocation. Returns next free row."""
-    row = _section_title(ws, row, 8, 'Allocation by Market Cap')
-    row = _styled_header(ws, row, 8, ['Market Cap', 'Invested (₹)', '% of Total'])
+    row = _section_title(ws, row, 9, 'Allocation by Market Cap')
+    row = _styled_header(ws, row, 9, ['Market Cap', 'Invested (₹)', '% of Total', 'Returns'])
 
-    if 'Cap' not in df.columns or 'Invested_Value' not in df.columns:
-        _data_cell(ws, row, 8, 'No data')
+    if 'Cap' not in df.columns or 'Invested_Value' not in df.columns or 'Current_Value' not in df.columns:
+        _data_cell(ws, row, 9, 'No data')
         return row + 1
 
-    grouped = df.groupby('Cap')['Invested_Value'].sum().sort_values(ascending=False)
+    grouped = df.groupby('Cap')[['Invested_Value', 'Current_Value']].sum()
     grouped = grouped[grouped.index != '']
-    total = grouped.sum()
+    grouped = grouped.sort_values(by='Invested_Value', ascending=False)
+    
+    total_inv = grouped['Invested_Value'].sum()
+    total_cur = grouped['Current_Value'].sum()
 
-    for label, val in grouped.items():
-        _data_cell(ws, row, 8, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 9, round(val, 2), fmt=INR_FMT)
-        _data_cell(ws, row, 10, val / total if total > 0 else 0, fmt=PCT_FMT)
+    for label, row_data in grouped.iterrows():
+        inv = row_data['Invested_Value']
+        cur = row_data['Current_Value']
+        ret = (cur - inv) / inv if inv > 0 else 0
+        
+        _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
+        _data_cell(ws, row, 10, round(inv, 2), fmt=INR_FMT)
+        _data_cell(ws, row, 11, inv / total_inv if total_inv > 0 else 0, fmt=PCT_FMT)
+        
+        ret_font = RED_FONT if ret < 0 else (GREEN_FONT if ret > 0 else None)
+        _data_cell(ws, row, 12, ret, fmt=PCT_FMT, font=ret_font)
         row += 1
 
     # Total row
-    _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
-    _data_cell(ws, row, 9, round(total, 2), fmt=INR_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 10, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
+    total_ret = (total_cur - total_inv) / total_inv if total_inv > 0 else 0
+    total_ret_font = RED_FONT if total_ret < 0 else (GREEN_FONT if total_ret > 0 else None)
+
+    _data_cell(ws, row, 9, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 10, round(total_inv, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 11, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 12, total_ret, fmt=PCT_FMT, font=total_ret_font)
     row += 1
 
     return row
@@ -292,11 +337,11 @@ def _write_cap_allocation(ws, df, row):
 
 def _write_classification_allocation(ws, df, row):
     """Core & Satellite distribution. Returns next free row."""
-    row = _section_title(ws, row, 8, 'Core & Satellite Distribution')
-    row = _styled_header(ws, row, 8, ['Classification', 'Invested (₹)', '% of Total'])
+    row = _section_title(ws, row, 9, 'Core & Satellite Distribution')
+    row = _styled_header(ws, row, 9, ['Classification', 'Invested (₹)', '% of Total'])
 
     if 'TF_Classification' not in df.columns or 'Invested_Value' not in df.columns:
-        _data_cell(ws, row, 8, 'No data')
+        _data_cell(ws, row, 9, 'No data')
         return row + 1
 
     grouped = df.groupby('TF_Classification')['Invested_Value'].sum().sort_values(ascending=False)
@@ -304,14 +349,14 @@ def _write_classification_allocation(ws, df, row):
     total = grouped.sum()
 
     for label, val in grouped.items():
-        _data_cell(ws, row, 8, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 9, round(val, 2), fmt=INR_FMT)
-        _data_cell(ws, row, 10, val / total if total > 0 else 0, fmt=PCT_FMT)
+        _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
+        _data_cell(ws, row, 10, round(val, 2), fmt=INR_FMT)
+        _data_cell(ws, row, 11, val / total if total > 0 else 0, fmt=PCT_FMT)
         row += 1
 
-    _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
-    _data_cell(ws, row, 9, round(total, 2), fmt=INR_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 10, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 9, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 10, round(total, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 11, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
     row += 1
 
     return row
@@ -323,11 +368,11 @@ def _write_classification_allocation(ws, df, row):
 
 def _write_sector_allocation(ws, df, row):
     """Sector-wise allocation. Returns next free row."""
-    row = _section_title(ws, row, 8, 'Allocation by Sector')
-    row = _styled_header(ws, row, 8, ['Sector', 'Invested (₹)', '% of Total'])
+    row = _section_title(ws, row, 9, 'Allocation by Sector')
+    row = _styled_header(ws, row, 9, ['Sector', 'Invested (₹)', '% of Total'])
 
     if 'TF_Sector' not in df.columns or 'Invested_Value' not in df.columns:
-        _data_cell(ws, row, 8, 'No data')
+        _data_cell(ws, row, 9, 'No data')
         return row + 1
 
     grouped = df.groupby('TF_Sector')['Invested_Value'].sum().sort_values(ascending=False)
@@ -335,14 +380,14 @@ def _write_sector_allocation(ws, df, row):
     total = grouped.sum()
 
     for label, val in grouped.items():
-        _data_cell(ws, row, 8, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 9, round(val, 2), fmt=INR_FMT)
-        _data_cell(ws, row, 10, val / total if total > 0 else 0, fmt=PCT_FMT)
+        _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
+        _data_cell(ws, row, 10, round(val, 2), fmt=INR_FMT)
+        _data_cell(ws, row, 11, val / total if total > 0 else 0, fmt=PCT_FMT)
         row += 1
 
-    _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
-    _data_cell(ws, row, 9, round(total, 2), fmt=INR_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 10, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 9, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 10, round(total, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 11, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
     row += 1
 
     return row
@@ -354,16 +399,16 @@ def _write_sector_allocation(ws, df, row):
 
 def _write_core_satellite_sector_allocation(ws, df, row):
     """Sector allocation split by Core and Satellite. Returns next free row."""
-    row = _section_title(ws, row, 8, 'Sector Allocation (Core vs Satellite)')
-    row = _styled_header(ws, row, 8, ['Sector', 'Core (₹)', 'Satellite (₹)', 'Total (₹)'])
+    row = _section_title(ws, row, 9, 'Sector Allocation (Core vs Satellite)')
+    row = _styled_header(ws, row, 9, ['Sector', 'Core (₹)', 'Satellite (₹)', 'Total (₹)'])
 
     if 'TF_Sector' not in df.columns or 'TF_Classification' not in df.columns or 'Invested_Value' not in df.columns:
-        _data_cell(ws, row, 8, 'No data')
+        _data_cell(ws, row, 9, 'No data')
         return row + 1
 
     valid_df = df[df['TF_Sector'] != ''].copy()
     if valid_df.empty:
-        _data_cell(ws, row, 8, 'No sector data available')
+        _data_cell(ws, row, 9, 'No sector data available')
         return row + 1
 
     core_mask = valid_df['TF_Classification'].str.contains('Core', case=False, na=False)
@@ -385,16 +430,16 @@ def _write_core_satellite_sector_allocation(ws, df, row):
     total_all = combined['Total'].sum()
 
     for sector, row_data in combined.iterrows():
-        _data_cell(ws, row, 8, str(sector), font=LABEL_FONT)
-        _data_cell(ws, row, 9, round(row_data['Core'], 2), fmt=INR_FMT)
-        _data_cell(ws, row, 10, round(row_data['Satellite'], 2), fmt=INR_FMT)
-        _data_cell(ws, row, 11, round(row_data['Total'], 2), fmt=INR_FMT)
+        _data_cell(ws, row, 9, str(sector), font=LABEL_FONT)
+        _data_cell(ws, row, 10, round(row_data['Core'], 2), fmt=INR_FMT)
+        _data_cell(ws, row, 11, round(row_data['Satellite'], 2), fmt=INR_FMT)
+        _data_cell(ws, row, 12, round(row_data['Total'], 2), fmt=INR_FMT)
         row += 1
 
-    _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
-    _data_cell(ws, row, 9, round(total_core, 2), fmt=INR_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 10, round(total_sat, 2), fmt=INR_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 11, round(total_all, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 9, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 10, round(total_core, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 11, round(total_sat, 2), fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 12, round(total_all, 2), fmt=INR_FMT, font=LABEL_FONT)
     row += 1
 
     return row
@@ -408,11 +453,11 @@ def _write_core_satellite_sector_allocation(ws, df, row):
 
 def _write_pnl_by_cap(ws, overall_df, row):
     """PnL comparison by cap. Returns next free row."""
-    row = _section_title(ws, row, 8, 'PnL Breakdown by Cap')
-    row = _styled_header(ws, row, 8, ['Cap', 'Realized PnL', 'Unrealized PnL', 'Total PnL'])
+    row = _section_title(ws, row, 9, 'PnL Breakdown by Cap')
+    row = _styled_header(ws, row, 9, ['Cap', 'Realized PnL', 'Unrealized PnL', 'Total PnL'])
 
     if 'Cap' not in overall_df.columns:
-        _data_cell(ws, row, 8, 'No data')
+        _data_cell(ws, row, 9, 'No data')
         return row + 1
 
     grouped = overall_df.groupby('Cap').agg(
@@ -428,21 +473,21 @@ def _write_pnl_by_cap(ws, overall_df, row):
         grand_r += r_val
         grand_u += u_val
 
-        _data_cell(ws, row, 8, str(cat), font=LABEL_FONT)
-        _data_cell(ws, row, 9, r_val, fmt=INR_FMT,
+        _data_cell(ws, row, 9, str(cat), font=LABEL_FONT)
+        _data_cell(ws, row, 10, r_val, fmt=INR_FMT,
                    font=GREEN_FONT if r_val > 0 else (RED_FONT if r_val < 0 else None))
-        _data_cell(ws, row, 10, u_val, fmt=INR_FMT,
+        _data_cell(ws, row, 11, u_val, fmt=INR_FMT,
                    font=GREEN_FONT if u_val > 0 else (RED_FONT if u_val < 0 else None))
-        _data_cell(ws, row, 11, t_val, fmt=INR_FMT,
+        _data_cell(ws, row, 12, t_val, fmt=INR_FMT,
                    font=GREEN_FONT if t_val > 0 else (RED_FONT if t_val < 0 else None))
         row += 1
 
     # Total row
     grand_t = grand_r + grand_u
-    _data_cell(ws, row, 8, 'TOTAL', font=LABEL_FONT)
-    _data_cell(ws, row, 9, grand_r, fmt=INR_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 10, grand_u, fmt=INR_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 11, grand_t, fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 9, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 10, grand_r, fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 11, grand_u, fmt=INR_FMT, font=LABEL_FONT)
+    _data_cell(ws, row, 12, grand_t, fmt=INR_FMT, font=LABEL_FONT)
     row += 1
 
     return row
@@ -454,11 +499,11 @@ def _write_pnl_by_cap(ws, overall_df, row):
 
 def _write_tranche_distribution(ws, df, row):
     """Tranche distribution counts. Returns next free row."""
-    row = _section_title(ws, row, 8, 'Tranche Distribution')
-    row = _styled_header(ws, row, 8, ['Tranche', 'Count', '% of Holdings'])
+    row = _section_title(ws, row, 9, 'Tranche Distribution')
+    row = _styled_header(ws, row, 9, ['Tranche', 'Count', '% of Holdings'])
 
     if 'Latest_Tranche' not in df.columns or len(df) == 0:
-        _data_cell(ws, row, 8, 'No data')
+        _data_cell(ws, row, 9, 'No data')
         return row + 1
 
     counts = df['Latest_Tranche'].value_counts().sort_index()
@@ -466,9 +511,9 @@ def _write_tranche_distribution(ws, df, row):
     total = counts.sum()
 
     for label, cnt in counts.items():
-        _data_cell(ws, row, 8, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 9, int(cnt))
-        _data_cell(ws, row, 10, cnt / total if total > 0 else 0, fmt=PCT_FMT)
+        _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
+        _data_cell(ws, row, 10, int(cnt))
+        _data_cell(ws, row, 11, cnt / total if total > 0 else 0, fmt=PCT_FMT)
         row += 1
 
     return row
@@ -480,12 +525,12 @@ def _write_tranche_distribution(ws, df, row):
 
 def _write_holding_distribution(ws, df, row):
     """Holding period bucket counts. Returns next free row."""
-    row = _section_title(ws, row, 8, 'Holding Period Distribution')
-    row = _styled_header(ws, row, 8, ['Period', 'Count', '% of Holdings'])
+    row = _section_title(ws, row, 9, 'Holding Period Distribution')
+    row = _styled_header(ws, row, 9, ['Period', 'Count', '% of Holdings'])
 
     total = len(df)
     if 'Holding_Period' not in df.columns or total == 0:
-        _data_cell(ws, row, 8, 'No data')
+        _data_cell(ws, row, 9, 'No data')
         return row + 1
 
     hp = df['Holding_Period']
@@ -497,9 +542,9 @@ def _write_holding_distribution(ws, df, row):
     ]
 
     for label, cnt in buckets:
-        _data_cell(ws, row, 8, label, font=LABEL_FONT)
-        _data_cell(ws, row, 9, cnt)
-        _data_cell(ws, row, 10, cnt / total if total > 0 else 0, fmt=PCT_FMT)
+        _data_cell(ws, row, 9, label, font=LABEL_FONT)
+        _data_cell(ws, row, 10, cnt)
+        _data_cell(ws, row, 11, cnt / total if total > 0 else 0, fmt=PCT_FMT)
         row += 1
 
     return row

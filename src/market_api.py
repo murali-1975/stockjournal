@@ -69,7 +69,12 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
             close_data = data['Close']
             for sym, ns_sym in zip(symbols, symbol_ns):
                 if len(symbols) == 1:
-                    series = close_data
+                    # Single symbol: close_data may be a DataFrame or Series;
+                    # squeeze to ensure we have a 1-D Series.
+                    if hasattr(close_data, 'squeeze'):
+                        series = close_data.squeeze()
+                    else:
+                        series = close_data
                 else:
                     if ns_sym in close_data.columns:
                         series = close_data[ns_sym]
@@ -79,11 +84,19 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
                 # Drop NAs to compute valid EMAs
                 valid_series = series.dropna()
                 if not valid_series.empty:
-                    market_data[sym]['LTP'] = round(float(valid_series.iloc[-1]), 2)
-                    market_data[sym]['EMA9'] = round(float(valid_series.ewm(span=9, adjust=False).mean().iloc[-1]), 2)
-                    market_data[sym]['EMA10'] = round(float(valid_series.ewm(span=10, adjust=False).mean().iloc[-1]), 2)
-                    market_data[sym]['EMA11'] = round(float(valid_series.ewm(span=11, adjust=False).mean().iloc[-1]), 2)
-                    market_data[sym]['EMA21'] = round(float(valid_series.ewm(span=21, adjust=False).mean().iloc[-1]), 2)
+                    ltp_val = valid_series.iloc[-1]
+                    if hasattr(ltp_val, 'item'):
+                        ltp_val = ltp_val.item()
+                    market_data[sym]['LTP'] = round(float(ltp_val), 2)
+
+                    ema9 = valid_series.ewm(span=9, adjust=False).mean().iloc[-1]
+                    ema10 = valid_series.ewm(span=10, adjust=False).mean().iloc[-1]
+                    ema11 = valid_series.ewm(span=11, adjust=False).mean().iloc[-1]
+                    ema21 = valid_series.ewm(span=21, adjust=False).mean().iloc[-1]
+                    for ema_key, ema_val in [('EMA9', ema9), ('EMA10', ema10), ('EMA11', ema11), ('EMA21', ema21)]:
+                        if hasattr(ema_val, 'item'):
+                            ema_val = ema_val.item()
+                        market_data[sym][ema_key] = round(float(ema_val), 2)
 
         # Fetch Market Cap and Splits for each symbol individually
         for sym, ns_sym in zip(symbols, symbol_ns):
@@ -103,4 +116,105 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
         print(f"Error fetching data from Yahoo Finance: {e}")
 
     return market_data
+
+
+def fetch_benchmark_returns(start_date_str: str, custom_benchmarks: list = None) -> dict:
+    """
+    Fetches the historical start-date prices and current LTPs for Nifty benchmark
+    ETFs to calculate portfolio-relative benchmark returns.
+    
+    Args:
+        start_date_str: String date in 'DD-MM-YYYY' format.
+        custom_benchmarks: Optional list of specific benchmark names from config.
+        
+    Returns:
+        A dict with the performance metrics:
+        {
+            'Nifty 50': {'Start_Price': 250.0, 'LTP': 275.0, 'Return_Pct': 10.0},
+            ...
+        }
+    """
+    import pandas as pd
+    
+    # Map common index names to their Yahoo Finance ticker symbols
+    KNOWN_BENCHMARKS = {
+        'NIFTY_50': '^NSEI',
+        'NIFTY_BANK': '^NSEBANK',
+        'CNXMIDCAP': '^NSEMDCP50',
+        'CNX100': '^CNX100',
+        'NIFTY_MIDCAP_150': '^NSEMDCP150',
+        'SENSEX': '^BSESN',
+        # Fallbacks to ETFs
+        'NIFTY_SMALLCAP_250': 'SMALLCAP.NS'
+    }
+
+    # Map friendly names to highly liquid tracking ETFs since direct indices
+    # on Yahoo Finance (like ^CNXSC) are often broken/missing.
+    benchmarks = {
+        'Nifty 50': 'NIFTYBEES.NS',
+        'Nifty Midcap 150': 'MID150BEES.NS',
+        'Nifty Smallcap 250': 'SMALLCAP.NS'
+    }
+
+    if custom_benchmarks:
+        benchmarks = {}
+        for b_name in custom_benchmarks:
+            upper_name = b_name.upper().replace(' ', '_')
+            if upper_name in KNOWN_BENCHMARKS:
+                benchmarks[b_name] = KNOWN_BENCHMARKS[upper_name]
+            else:
+                # If the user passes a direct YF ticker like ^NSEI, use it as-is
+                benchmarks[b_name] = upper_name if '^' in upper_name else b_name
+    
+    results = {
+        name: {'Start_Price': 0.0, 'LTP': 0.0, 'Return_Pct': 0.0} 
+        for name in benchmarks.keys()
+    }
+    
+    if not start_date_str:
+        return results
+        
+    try:
+        start_dt = pd.to_datetime(start_date_str, format='%d-%m-%Y', errors='coerce')
+        if pd.isna(start_dt):
+            return results
+            
+        import yfinance as yf
+        tickers = list(benchmarks.values())
+        print(f"\nFetching Historical Benchmark Returns since {start_dt.strftime('%d %b %Y')}...")
+        
+        # Start a bit earlier to ensure we catch the start date or closest trading day
+        fetch_start = start_dt - pd.Timedelta(days=5)
+        data = yf.download(tickers, start=fetch_start, progress=False)
+        
+        if 'Close' not in data:
+            return results
+            
+        close_data = data['Close']
+        
+        for name, ticker in benchmarks.items():
+            if ticker in close_data.columns:
+                series = close_data[ticker].dropna()
+                if not series.empty:
+                    # Find the closest date on or after the requested start_date
+                    future_dates = series[series.index.tz_localize(None) >= start_dt]
+                    if not future_dates.empty:
+                        start_price = float(future_dates.iloc[0])
+                    else:
+                        # Fallback to the last available if somehow there are no future dates
+                        start_price = float(series.iloc[-1])
+                        
+                    current_price = float(series.iloc[-1])
+                    
+                    results[name]['Start_Price'] = round(start_price, 2)
+                    results[name]['LTP'] = round(current_price, 2)
+                    
+                    if start_price > 0:
+                        results[name]['Return_Pct'] = (current_price - start_price) / start_price
+                        
+    except Exception as e:
+        print(f"Error fetching benchmark data: {e}")
+        
+    return results
+
 

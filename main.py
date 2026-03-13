@@ -70,9 +70,9 @@ def run_tests() -> bool:
 
     print()
     if result.wasSuccessful():
-        print("✅ ALL TESTS PASSED!")
+        print("[SUCCESS] ALL TESTS PASSED!")
     else:
-        print("❌ SOME TESTS FAILED!")
+        print("[FAIL] SOME TESTS FAILED!")
         print(f"   Failures: {len(result.failures)}")
         print(f"   Errors:   {len(result.errors)}")
 
@@ -119,8 +119,14 @@ def main():
     # Step 6: Calculate portfolios, PnL, and Stop Loss
     portfolio_df, overall_df = calculate_portfolios(df, grouped_df, config)
 
+    # Step 6.5: Fetch Benchmark Returns
+    start_date_str = config.get('INVEST_START_DATE', '')
+    custom_benchmarks = config.get('BENCHMARK_INDEX', None)
+    from src.market_api import fetch_benchmark_returns
+    benchmark_returns = fetch_benchmark_returns(start_date_str, custom_benchmarks) if start_date_str else None
+
     # Step 7: Save everything to Excel
-    save_workbook(df, grouped_df, portfolio_df, overall_df, output_path)
+    save_workbook(df, grouped_df, portfolio_df, overall_df, output_path, benchmark_returns)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,672 @@
+﻿python : 
+test_basic_portfolio (t
+est_calculations.TestCa
+lculatePortfolios.test_
+basic_portfolio)
+At line:1 char:1
++ python main.py 
+--test > 
+test_main_log.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (test_basic_po   
+ rt...asic_portfoli    
+o):String) [], Rem    
+oteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+A simple buy-only 
+scenario should 
+produce correct 
+portfolio values. ... 
+ok
+test_fully_sold_positio
+n (test_calculations.Te
+stCalculatePortfolios.t
+est_fully_sold_position
+)
+A fully sold position 
+should not appear in 
+Current Portfolio but 
+should be in Overall. 
+... ok
+test_realized_pnl (test
+_calculations.TestCalcu
+latePortfolios.test_rea
+lized_pnl)
+Selling shares should 
+produce correct 
+Realized PnL. ... ok
+test_boundary_large_cap
+ (test_calculations.Tes
+tClassifyMarketCap.test
+_boundary_large_cap)
+Market cap exactly at 
+large cap threshold 
+should be Large Cap. 
+... ok
+test_default_thresholds
+ (test_calculations.Tes
+tClassifyMarketCap.test
+_default_thresholds)
+Without config, SEBI 
+defaults should apply. 
+... ok
+test_large_cap (test_ca
+lculations.TestClassify
+MarketCap.test_large_ca
+p)
+Market cap >= 1,05,000 
+Cr should be Large 
+Cap. ... ok
+test_mid_cap (test_calc
+ulations.TestClassifyMa
+rketCap.test_mid_cap)
+Market cap between 
+small and large 
+thresholds should be 
+Mid Cap. ... ok
+test_small_cap (test_ca
+lculations.TestClassify
+MarketCap.test_small_ca
+p)
+Market cap below 
+34,700 Cr should be 
+Small Cap. ... ok
+test_zero_market_cap (t
+est_calculations.TestCl
+assifyMarketCap.test_ze
+ro_market_cap)
+Zero market cap should 
+return empty string. 
+... ok
+test_cheats_only (test_
+calculations.TestLatest
+TrancheCheat.test_cheat
+s_only)
+If only cheats, return 
+the highest cheat. ... 
+ok
+test_mixed_tranch_and_c
+heat (test_calculations
+.TestLatestTrancheCheat
+.test_mixed_tranch_and_
+cheat)
+Tranch 2 should beat 
+Cheat 1 (higher 
+number). ... ok
+test_multiple_tranches 
+(test_calculations.Test
+LatestTrancheCheat.test
+_multiple_tranches)
+Should return the 
+highest numbered 
+Tranche. ... ok
+test_no_tranch_column (
+test_calculations.TestL
+atestTrancheCheat.test_
+no_tranch_column)
+Without Tranches/Cheat 
+column, should return 
+empty string. ... ok
+test_sell_rows_ignored 
+(test_calculations.Test
+LatestTrancheCheat.test
+_sell_rows_ignored)
+Sell rows should not 
+contribute to the 
+latest label. ... ok
+test_single_tranch (tes
+t_calculations.TestLate
+stTrancheCheat.test_sin
+gle_tranch)
+Single Tranch 1 should 
+return 'Tranch 1'. ... 
+ok
+test_average_price_calc
+ulation (test_calculati
+ons.TestProcessGroupedT
+rades.test_average_pric
+e_calculation)
+Average price should 
+be total_value / 
+total_quantity, 
+rounded to 2 decimals. 
+... ok
+test_basic_grouping_no_
+config (test_calculatio
+ns.TestProcessGroupedTr
+ades.test_basic_groupin
+g_no_config)
+Without config, trades 
+should be grouped but 
+no Tranche column 
+added. ... ok
+test_cheat_accumulation
+_to_tranch (test_calcul
+ations.TestProcessGroup
+edTrades.test_cheat_acc
+umulation_to_tranch)
+Two cheats summing to 
+a full Tranche should 
+bump the Tranche 
+counter. ... ok
+test_cheat_label_assign
+ment (test_calculations
+.TestProcessGroupedTrad
+es.test_cheat_label_ass
+ignment)
+A buy below the CHEAT 
+threshold should be 
+labeled 'Cheat 1'. ... 
+ok
+test_sell_labeled_na (t
+est_calculations.TestPr
+ocessGroupedTrades.test
+_sell_labeled_na)
+Sell transactions 
+should always be 
+labeled 'N/A'. ... ok
+test_sequential_tranch_
+labels (test_calculatio
+ns.TestProcessGroupedTr
+ades.test_sequential_tr
+anch_labels)
+Multiple buys matching 
+TRANCH size should 
+produce Tranch 1, 
+Tranch 2, etc. ... ok
+test_tranch_label_assig
+nment (test_calculation
+s.TestProcessGroupedTra
+des.test_tranch_label_a
+ssignment)
+A buy matching the 
+TRANCH size (within 
+tolerance) should be 
+labeled 'Tranch 1'. 
+... ok
+test_sl_above_tranch_3 
+(test_calculations.Test
+StopLoss.test_sl_above_
+tranch_3)
+Tranch >3 SL should be 
+EMA 21. ... ok
+test_sl_no_tranch_colum
+n (test_calculations.Te
+stStopLoss.test_sl_no_t
+ranch_column)
+Without Tranches/Cheat 
+column, SL defaults to 
+-10% from avg buy. ... 
+ok
+test_sl_tranch_1 (test_
+calculations.TestStopLo
+ss.test_sl_tranch_1)
+Tranch 1 SL should be 
+-10% from average buy 
+price. ... ok
+test_sl_tranch_2 (test_
+calculations.TestStopLo
+ss.test_sl_tranch_2)
+Tranch 2 SL should be 
+average price of 
+Tranch 1 buys. ... ok
+test_sl_tranch_3 (test_
+calculations.TestStopLo
+ss.test_sl_tranch_3)
+Tranch 3 SL should be 
+average price of 
+Tranch 1+2+3 buys. ... 
+ok
+test_cap_threshold_pars
+ing (test_config.TestLo
+adConfig.test_cap_thres
+hold_parsing)
+Cap thresholds like 
+'Below \u20b934,700 
+Cr' should parse 
+correctly. ... ERROR
+test_cheat_threshold (t
+est_config.TestLoadConf
+ig.test_cheat_threshold
+)
+'<75000' should parse 
+to 75000.0. ... FAIL
+test_direct_numeric_val
+ues (test_config.TestLo
+adConfig.test_direct_nu
+meric_values)
+Direct numeric values 
+like TOTAL_PORTFOLIO = 
+5000000 should parse 
+to float. ... ok
+test_full_config (test_
+config.TestLoadConfig.t
+est_full_config)
+Full realistic config 
+should parse all 
+values correctly. ... 
+FAIL
+test_missing_config_fil
+e (test_config.TestLoad
+Config.test_missing_con
+fig_file)
+A missing config file 
+should return an empty 
+dict without crashing. 
+... ok
+test_percentage_of_port
+folio (test_config.Test
+LoadConfig.test_percent
+age_of_portfolio)
+'2% of 
+TOTAL_PORTFOLIO' 
+should resolve to 2% 
+of the total portfolio 
+value. ... ok
+test_tolerance_parsing 
+(test_config.TestLoadCo
+nfig.test_tolerance_par
+sing)
+'+/-10%' should parse 
+to 0.10. ... ok
+test_already_applied_sp
+lit (test_corporate_act
+ions.TestCorporateActio
+ns.test_already_applied
+_split)
+If the split date is 
+found in 
+applied_splits.json, 
+it should not prompt 
+again. ... ok
+test_apply_split_adjust
+ment (test_corporate_ac
+tions.TestCorporateActi
+ons.test_apply_split_ad
+justment)
+If user approves, 
+quantity should 
+multiply by ratio, 
+price divide by ratio. 
+... ok
+test_no_splits_found (t
+est_corporate_actions.T
+estCorporateActions.tes
+t_no_splits_found)
+If no splits are found 
+on Yahoo, it should 
+return False and 
+unmodified df. ... ok
+test_splits_before_firs
+t_buy_ignored (test_cor
+porate_actions.TestCorp
+orateActions.test_split
+s_before_first_buy_igno
+red)
+Splits occurring 
+before the user's 
+first buy date should 
+be ignored. ... ok
+test_user_rejects_adjus
+tment (test_corporate_a
+ctions.TestCorporateAct
+ions.test_user_rejects_
+adjustment)
+If splits found but 
+user types 'n', return 
+False and unmodified 
+df. ... ok
+test_create_dashboard (
+test_dashboard.TestDash
+board.test_create_dashb
+oard)
+Dashboard should 
+render without 
+exceptions and create 
+the required sheet. 
+... ok
+test_create_dashboard_e
+mpty_data (test_dashboa
+rd.TestDashboard.test_c
+reate_dashboard_empty_d
+ata)
+Dashboard should 
+gracefully handle 
+empty DataFrames. ... 
+ok
+test_id_columns_as_stri
+ngs (test_data_io.TestL
+oadData.test_id_columns
+_as_strings)
+ID columns should be 
+read as strings to 
+prevent scientific 
+notation. ... ok
+test_missing_columns (t
+est_data_io.TestLoadDat
+a.test_missing_columns)
+A file missing 
+required columns 
+should return None. 
+... ok
+test_missing_file (test
+_data_io.TestLoadData.t
+est_missing_file)
+A missing file should 
+return None. ... ok
+test_valid_file (test_d
+ata_io.TestLoadData.tes
+t_valid_file)
+A valid Excel file 
+with required columns 
+should load 
+successfully. ... ok
+test_both_none (test_da
+ta_io.TestMergeAndDedup
+licate.test_both_none)
+If both master and new 
+are None, should 
+return None. ... ok
+test_merge_no_duplicate
+s (test_data_io.TestMer
+geAndDeduplicate.test_m
+erge_no_duplicates)
+Merging two 
+non-overlapping 
+DataFrames should 
+concatenate them. ... 
+ok
+test_merge_partial_dupl
+icates (test_data_io.Te
+stMergeAndDeduplicate.t
+est_merge_partial_dupli
+cates)
+Only exact duplicates 
+should be removed; 
+unique rows must be 
+kept. ... ok
+test_merge_with_duplica
+tes (test_data_io.TestM
+ergeAndDeduplicate.test
+_merge_with_duplicates)
+Exact duplicate rows 
+should be dropped 
+after merging. ... ok
+test_only_master (test_
+data_io.TestMergeAndDed
+uplicate.test_only_mast
+er)
+If only master_df is 
+provided, it should be 
+returned as-is. ... ok
+test_only_new (test_dat
+a_io.TestMergeAndDedupl
+icate.test_only_new)
+If only new_df is 
+provided, it should be 
+returned as-is. ... ok
+test_append_mode_preser
+ves_custom_sheets (test
+_excel_writer.TestSaveW
+orkbook.test_append_mod
+e_preserves_custom_shee
+ts)
+Running save_workbook 
+twice should not 
+destroy custom user 
+sheets. ... ok
+test_currency_format_ap
+plied (test_excel_write
+r.TestSaveWorkbook.test
+_currency_format_applie
+d)
+Monetary columns in 
+Transaction sheet 
+should have INR 
+currency format. ... ok
+test_id_column_is_integ
+er (test_excel_writer.T
+estSaveWorkbook.test_id
+_column_is_integer)
+Order ID cells should 
+contain native 
+integers, not strings. 
+... ok
+test_percentage_format_
+applied (test_excel_wri
+ter.TestSaveWorkbook.te
+st_percentage_format_ap
+plied)
+Total_PnL_Percentage 
+in Overall_Portfolio 
+should have percentage 
+format. ... ok
+test_sheets_created (te
+st_excel_writer.TestSav
+eWorkbook.test_sheets_c
+reated)
+All four expected 
+sheets should be 
+created in the 
+workbook. ... ok
+test_fetch_api_error (t
+est_market_api.TestMark
+etAPI.test_fetch_api_er
+ror)
+If API raises an 
+Exception, it should 
+catch gracefully and 
+return defaults. ... ok
+test_fetch_empty_list (
+test_market_api.TestMar
+ketAPI.test_fetch_empty
+_list)
+Fetching data for an 
+empty list should 
+return an empty dict 
+without calling API. 
+... ok
+test_fetch_multiple_sym
+bols (test_market_api.T
+estMarketAPI.test_fetch
+_multiple_symbols)
+Test fetching data for 
+multiple symbols where 
+yfinance returns 
+MultiIndex or columns. 
+... ok
+test_fetch_single_symbo
+l (test_market_api.Test
+MarketAPI.test_fetch_si
+ngle_symbol)
+Test fetching data for 
+a single symbol. ... ok
+
+=======================
+=======================
+=======================
+=
+ERROR: test_cap_thresho
+ld_parsing (test_config
+.TestLoadConfig.test_ca
+p_threshold_parsing)
+Cap thresholds like 
+'Below \u20b934,700 
+Cr' should parse 
+correctly.
+-----------------------
+-----------------------
+-----------------------
+-
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\tests\te
+st_config.py", line 
+106, in test_cap_thresh
+old_parsing
+    self.assertEqual(co
+nfig['SMALL_CAP']['type
+'], 'below')
+                     ~~
+~~~~~~~~~~~~~~~~~^^^^^^
+^^
+TypeError: string 
+indices must be 
+integers, not 'str'
+
+=======================
+=======================
+=======================
+=
+FAIL: 
+test_cheat_threshold (t
+est_config.TestLoadConf
+ig.test_cheat_threshold
+)
+'<75000' should parse 
+to 75000.0.
+-----------------------
+-----------------------
+-----------------------
+-
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\tests\te
+st_config.py", line 
+65, in 
+test_cheat_threshold
+    self.assertEqual(co
+nfig['CHEAT'], 75000.0)
+    ~~~~~~~~~~~~~~~~^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 
+{'type': 'unknown', 
+'value': 0} != 75000.0
+
+=======================
+=======================
+=======================
+=
+FAIL: test_full_config 
+(test_config.TestLoadCo
+nfig.test_full_config)
+Full realistic config 
+should parse all 
+values correctly.
+-----------------------
+-----------------------
+-----------------------
+-
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\tests\te
+st_config.py", line 
+91, in test_full_config
+    self.assertEqual(co
+nfig['CHEAT'], 75000.0)
+    ~~~~~~~~~~~~~~~~^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 
+{'type': 'unknown', 
+'value': 0} != 75000.0
+
+-----------------------
+-----------------------
+-----------------------
+-
+Ran 60 tests in 1.565s
+
+FAILED (failures=2, 
+errors=1)
+============================================================
+  RUNNING TEST SUITE
+============================================================
+Equity Master file '' not found. Skipping TF columns.
+Equity Master file '' not found. Skipping TF columns.
+Equity Master file '' not found. Skipping TF columns.
+Config file /nonexistent/path/config.cfg not found. Skipping tranche logic.
+Dashboard sheet created.
+Dashboard sheet created.
+Reading C:\Users\DELL\AppData\Local\Temp\tmp1qcvt79g\ids.xlsx...
+Data loaded successfully.
+Reading C:\Users\DELL\AppData\Local\Temp\tmpx61zlfm8\bad.xlsx...
+Error: The input file is missing required columns: ['Trade Date', 'Symbol', 'Trade Type', 'Quantity', 'Price']
+Reading /nonexistent/file.xlsx...
+Error: /nonexistent/file.xlsx not found.
+Reading C:\Users\DELL\AppData\Local\Temp\tmphx7j4urb\valid.xlsx...
+Data loaded successfully.
+No valid data available to process. Exiting.
+Appending new trades to the master database...
+Appending new trades to the master database...
+Dropped 1 duplicate trades.
+Appending new trades to the master database...
+Dropped 3 duplicate trades.
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmpfi3xnb1x\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmpfi3xnb1x\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmp1e7q5sq6\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmpzbhl9hli\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmp5yqr7s8g\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmp24iidnr4\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for 1 symbols...
+Error fetching data from Yahoo Finance: API Timeout
+Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for 2 symbols...
+Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for 1 symbols...
+
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\main.py"
+, line 133, in <module>
+    success = 
+run_tests()
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\main.py"
+, line 75, in run_tests
+    print("\u274c SOME 
+TESTS FAILED!")
+    ~~~~~^^^^^^^^^^^^^^
+^^^^^^^^^^^
+  File "C:\Users\DELL\A
+ppData\Local\Python\pyt
+honcore-3.14-64\Lib\enc
+odings\cp1252.py", 
+line 19, in encode
+    return codecs.charm
+ap_encode(input,self.er
+rors,encoding_table)[0]
+           ~~~~~~~~~~~~
+~~~~~~~~~^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 
+'charmap' codec can't 
+encode character 
+'\u274c' in position 
+0: character maps to 
+<undefined>

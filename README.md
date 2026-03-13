@@ -7,7 +7,9 @@ A powerful Python-based trading journal and portfolio management system designed
 - **Automated Data Merging**: Appends new trades from a standard template seamlessly into your master database without duplicates.
 - **Grouped Trade Analysis (Tranches/Cheats)**: Smartly groups trades of the same symbol to incrementally assign logical "Tranche" levels based on cumulative investment size.
 - **Live Market Data Integration**: Fetches real-time Last Traded Price (LTP) and Exponential Moving Averages (EMA 9, 10, 11, 21) dynamically from Yahoo Finance.
+- **Benchmark Returns Tracking**: Extracts an `INVEST_START_DATE` and calculates comparative returns against Nifty 50, Nifty Midcap, and Nifty Smallcap indices.
 - **Dynamic Stop-Loss Calculation**: Computes trailing and average-price based Stop Loss values dependent on the stock's current Tranche level.
+- **Smart Categorization**: Classifies stocks by Sector, Market Cap, and as "Core or Satellite" based on `.cfg` and Equity Master files automatically.
 - **Corporate Action Handling**: Automatically detects stock splits and bonuses (post-purchase) from Yahoo Finance and interacts with the user to auto-adjust historical trade data directly.
 - **Excel Dashboard Generation**: Outputs deeply formatted, Excel-native dashboards including Allocation breakdowns (Sector, Market Cap, Core/Satellite), KPI Summaries, top gainers/losers, and PnL metrics.
 - **Parameterized Live Polling**: Can run as a continuous background process, periodically updating your Excel file with the freshest prices and EMAs.
@@ -72,12 +74,13 @@ Runs the internal automated Python `unittest` suite (testing grouping logic, con
 The `input.cfg` file allows you to define your core portfolio values and logical limits without touching the Python code:
 
 - `TOTAL_PORTFOLIO`: Base amount used for percentage calculations.
+- `INVEST_START_DATE`: Baseline date (e.g., `2024-01-01`) used to calculate Benchmark Index returns.
 - `TRANCH`: Denotes the size of a standard investment bracket.
 - `TRANCH_TOLERANCE`: Allowed drift for a Tranche size.
 - `CHEAT`: Maximum size for smaller fractional trades before they roll into a Tranch.
 - `MAX_POSITION_SIZE`: A safeguard limit per symbol.
 - `SMALL_CAP / MEDIUM_CAP / LARGE_CAP`: Market cap categorization definitions (in ₹ Crores).
-- `EQUITY_MASTER`: The internal filename for your Sector mapping tracker.
+- `EQUITY_MASTER`: The internal filename for your Sector and Core/Satellite mapping tracker.
 
 ---
 

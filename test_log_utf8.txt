@@ -1,0 +1,259 @@
+﻿python : E.............
+..............EF.F.....
+.......................
+.
+At line:1 char:1
++ python -m unittest > 
+test_log.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (E............   
+ ..................    
+..:String) [], Rem    
+oteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+=======================
+=======================
+=======================
+=
+ERROR: test (unittest.l
+oader._FailedTest.test)
+-----------------------
+-----------------------
+-----------------------
+-
+ImportError: Failed to 
+import test module: 
+test
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\A
+ppData\Local\Python\pyt
+honcore-3.14-64\Lib\uni
+ttest\loader.py", line 
+426, in _find_test_path
+    module = self._get_
+module_from_name(name)
+  File "C:\Users\DELL\A
+ppData\Local\Python\pyt
+honcore-3.14-64\Lib\uni
+ttest\loader.py", line 
+367, in 
+_get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\test.py"
+, line 3, in <module>
+    df['VN'] = df['Tota
+l_Value'].str.replace('
+\u20b9', '', regex=Fals
+e).str.replace(',', 
+'', regex=False).astype
+(float)
+               
+^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\A
+ppData\Local\Python\pyt
+honcore-3.14-64\Lib\sit
+e-packages\pandas\core\
+generic.py", line 
+6206, in __getattr__
+    return object.__get
+attribute__(self, name)
+           ~~~~~~~~~~~~
+~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\DELL\A
+ppData\Local\Python\pyt
+honcore-3.14-64\Lib\sit
+e-packages\pandas\core\
+accessor.py", line 
+230, in __get__
+    return 
+self._accessor(obj)
+           
+~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\DELL\A
+ppData\Local\Python\pyt
+honcore-3.14-64\Lib\sit
+e-packages\pandas\core\
+strings\accessor.py", 
+line 194, in __init__
+    
+self._inferred_dtype = 
+self._validate(data)
+                       
+    
+~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\DELL\A
+ppData\Local\Python\pyt
+honcore-3.14-64\Lib\sit
+e-packages\pandas\core\
+strings\accessor.py", 
+line 248, in _validate
+    raise 
+AttributeError(
+        f"Can only use 
+.str accessor with 
+string values, not 
+{inferred_dtype}"
+    )
+AttributeError: Can 
+only use .str accessor 
+with string values, 
+not floating. Did you 
+mean: 'std'?
+
+
+=======================
+=======================
+=======================
+=
+ERROR: test_cap_thresho
+ld_parsing (tests.test_
+config.TestLoadConfig.t
+est_cap_threshold_parsi
+ng)
+Cap thresholds like 
+'Below \u20b934,700 
+Cr' should parse 
+correctly.
+-----------------------
+-----------------------
+-----------------------
+-
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\tests\te
+st_config.py", line 
+106, in test_cap_thresh
+old_parsing
+    self.assertEqual(co
+nfig['SMALL_CAP']['type
+'], 'below')
+                     ~~
+~~~~~~~~~~~~~~~~~^^^^^^
+^^
+TypeError: string 
+indices must be 
+integers, not 'str'
+
+=======================
+=======================
+=======================
+=
+FAIL: 
+test_cheat_threshold (t
+ests.test_config.TestLo
+adConfig.test_cheat_thr
+eshold)
+'<75000' should parse 
+to 75000.0.
+-----------------------
+-----------------------
+-----------------------
+-
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\tests\te
+st_config.py", line 
+65, in 
+test_cheat_threshold
+    self.assertEqual(co
+nfig['CHEAT'], 75000.0)
+    ~~~~~~~~~~~~~~~~^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 
+{'type': 'unknown', 
+'value': 0} != 75000.0
+
+=======================
+=======================
+=======================
+=
+FAIL: test_full_config 
+(tests.test_config.Test
+LoadConfig.test_full_co
+nfig)
+Full realistic config 
+should parse all 
+values correctly.
+-----------------------
+-----------------------
+-----------------------
+-
+Traceback (most recent 
+call last):
+  File "C:\Users\DELL\O
+neDrive\Desktop\Project
+s\stockjournal\tests\te
+st_config.py", line 
+91, in test_full_config
+    self.assertEqual(co
+nfig['CHEAT'], 75000.0)
+    ~~~~~~~~~~~~~~~~^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 
+{'type': 'unknown', 
+'value': 0} != 75000.0
+
+-----------------------
+-----------------------
+-----------------------
+-
+Ran 61 tests in 1.090s
+
+FAILED (failures=2, 
+errors=2)
+Equity Master file '' not found. Skipping TF columns.
+Equity Master file '' not found. Skipping TF columns.
+Equity Master file '' not found. Skipping TF columns.
+Config file /nonexistent/path/config.cfg not found. Skipping tranche logic.
+Dashboard sheet created.
+Dashboard sheet created.
+Reading C:\Users\DELL\AppData\Local\Temp\tmpkat7v9ga\ids.xlsx...
+Data loaded successfully.
+Reading C:\Users\DELL\AppData\Local\Temp\tmpwsu9ejw5\bad.xlsx...
+Error: The input file is missing required columns: ['Trade Date', 'Symbol', 'Trade Type', 'Quantity', 'Price']
+Reading /nonexistent/file.xlsx...
+Error: /nonexistent/file.xlsx not found.
+Reading C:\Users\DELL\AppData\Local\Temp\tmpj4xh95_l\valid.xlsx...
+Data loaded successfully.
+No valid data available to process. Exiting.
+Appending new trades to the master database...
+Appending new trades to the master database...
+Dropped 1 duplicate trades.
+Appending new trades to the master database...
+Dropped 3 duplicate trades.
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmpv5a_rbn4\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmpv5a_rbn4\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmpaedq8vo7\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmp_5qtzmlh\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmp4jesc9od\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Saving transformed data to C:\Users\DELL\AppData\Local\Temp\tmp6uoas7du\test_output.xlsx...
+Dashboard sheet created.
+Done!
+Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for 1 symbols...
+Error fetching data from Yahoo Finance: API Timeout
+Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for 2 symbols...
+Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for 1 symbols...
