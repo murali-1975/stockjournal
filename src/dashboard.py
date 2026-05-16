@@ -48,6 +48,20 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
         portfolio_df: The Current Portfolio DataFrame.
         overall_df:   The Overall Portfolio DataFrame.
     """
+    # Force numeric types on essential columns to prevent 'object' dtype errors during calculations
+    num_cols_p = ['Invested_Value', 'Current_Value', 'Unrealized_PnL', 'LTP', 'SL', 
+                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Holding_Period', 'Average_Buy_Price']
+    for col in num_cols_p:
+        if col in portfolio_df.columns:
+            portfolio_df[col] = pd.to_numeric(portfolio_df[col], errors='coerce').fillna(0)
+
+    num_cols_o = ['Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage', 
+                  'Invested_Value', 'Current_Value', 'Total_Buy_Value', 'Average_Buy_Price',
+                  'Total_Sell_Value', 'Average_Sell_Price']
+    for col in num_cols_o:
+        if col in overall_df.columns:
+            overall_df[col] = pd.to_numeric(overall_df[col], errors='coerce').fillna(0)
+
     if 'Dashboard' in wb.sheetnames:
         del wb['Dashboard']
 
@@ -208,6 +222,9 @@ def _write_top_bottom_table(ws, df, row):
         _data_cell(ws, row, 1, 'No data')
         return row + 1
 
+    # Ensure Unrealized_PnL is numeric to avoid 'object' dtype errors with nlargest/nsmallest
+    df['Unrealized_PnL'] = pd.to_numeric(df['Unrealized_PnL'], errors='coerce').fillna(0)
+    
     top5 = df.nlargest(5, 'Unrealized_PnL')
     bot5 = df.nsmallest(5, 'Unrealized_PnL')
     combined = pd.concat([top5, bot5]).drop_duplicates(subset='Symbol')
@@ -244,6 +261,9 @@ def _write_nearest_sl_table(ws, df, row):
         _data_cell(ws, row, 1, 'No data')
         return row + 1
 
+    # Ensure LTP_SL_Diff_Pct is numeric
+    df['LTP_SL_Diff_Pct'] = pd.to_numeric(df['LTP_SL_Diff_Pct'], errors='coerce').fillna(0)
+    
     nearest = df.nsmallest(10, 'LTP_SL_Diff_Pct')
     col_keys = ['Symbol', 'TF_Classification', 'LTP', 'SL', 'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Latest_Tranche']
     formats = [None, None, INR_FMT, INR_FMT, INR_FMT, PCT_FMT, None]

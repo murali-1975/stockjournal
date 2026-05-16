@@ -161,6 +161,9 @@ def load_equity_master(config: dict) -> pd.DataFrame | None:
         result.columns = ['Symbol', 'TF_Sector', 'TF_Classification']
         result['Symbol'] = result['Symbol'].str.strip()
         return result
+    except PermissionError:
+        print(f"Error loading Equity Master: Permission denied. Please close '{equity_file}' if it is open in Excel and try again.")
+        return None
     except Exception as e:
         print(f"Error loading Equity Master: {e}")
         return None

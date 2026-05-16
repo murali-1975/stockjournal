@@ -7,6 +7,7 @@ Entry point for the Stock Journal trade processing engine.
 Usage:
     python main.py                   Run the full trade processing pipeline once
     python main.py --test            Run all tests before processing
+    python main.py --update          Only update LTP, EMA, and Dashboard (skips loading new trades)
     python main.py --watch <mins>    Run in a continuous loop, updating LTP/EMA every N minutes
 
 This script:
@@ -80,12 +81,13 @@ def run_tests() -> bool:
     return result.wasSuccessful()
 
 
-def main():
+def main(update_only: bool = False):
     """
     Main execution pipeline.
 
-    Orchestrates the full trade processing workflow from data ingestion
-    through to formatted Excel output.
+    Orchestrates the trade processing workflow.
+    If update_only is True, skips loading/merging new trades from the template
+    and only refreshes market data (LTP, EMAs) and the dashboard.
     """
     current_dir = os.path.dirname(os.path.abspath(__file__))
     input_path = os.path.join(current_dir, 'Tradebook Template.xlsx')
@@ -95,15 +97,21 @@ def main():
     # Step 1: Load configuration
     config = load_config(config_path)
 
-    # Step 2: Load existing master database (if any)
+    # Step 2: Load existing master database
     master_df = load_master_database(output_path)
 
-    # Step 3: Load new trades from the input template
-    new_df = load_data(input_path)
+    if update_only:
+        print("LTP/EMA Update Mode: Skipping new trade ingestion.")
+        df = master_df
+    else:
+        # Step 3: Load new trades from the input template
+        new_df = load_data(input_path)
 
-    # Step 4: Merge and deduplicate
-    df = merge_and_deduplicate(master_df, new_df)
-    if df is None:
+        # Step 4: Merge and deduplicate
+        df = merge_and_deduplicate(master_df, new_df)
+    
+    if df is None or df.empty:
+        print("No trade data found to process.")
         return
 
     # Step 4.5: Check for auto-adjustments (Stock Splits/Bonuses)
@@ -141,7 +149,9 @@ if __name__ == "__main__":
             print("\nTests complete. Run without --test to process trades.")
             sys.exit(0)
 
-    if '--watch' in sys.argv:
+    if '--update' in sys.argv:
+        main(update_only=True)
+    elif '--watch' in sys.argv:
         try:
             idx = sys.argv.index('--watch')
             interval_minutes = float(sys.argv[idx + 1])
@@ -157,7 +167,7 @@ if __name__ == "__main__":
         while True:
             try:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting update cycle...")
-                main()
+                main(update_only=True)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Update complete. Waiting {interval_minutes} minutes...")
             except PermissionError as e:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ Permission Error: Could not save the Excel file. Is it open? Please close it to allow updates.")

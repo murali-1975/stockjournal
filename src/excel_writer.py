@@ -111,6 +111,8 @@ def save_workbook(
             create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns)
 
         print("Done!")
+    except PermissionError:
+        print(f"Error saving {output_file}: Permission denied. Please close the Excel file if it is open and try again.")
     except Exception as e:
         print(f"Error saving {output_file}: {e}")
 

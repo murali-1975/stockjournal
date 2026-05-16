@@ -47,6 +47,9 @@ To run the application, open your terminal (Command Prompt, PowerShell, or Git B
 ```bash
 python main.py
 ```
+### alternatively run using this command 
+```bash .\.venv\Scripts\python.exe main.py ```
+
 **What it does:** 
 Reads your configuration, merges any new trades from the `Tradebook Template.xlsx`, checks for stock splits (prompting you if found), fetches the latest market prices, calculates all PnL and Stop Loss values, and generates/updates the `Transformed_Tradebook.xlsx` file. It then gracefully exits.
 
