@@ -9,6 +9,7 @@ Usage:
     python main.py --test            Run all tests before processing
     python main.py --update          Only update LTP, EMA, and Dashboard (skips loading new trades)
     python main.py --watch <mins>    Run in a continuous loop, updating LTP/EMA every N minutes
+    python main.py --gsheet <name>   Export results to a Google Sheet (by name or ID)
 
 This script:
     1. Loads the configuration from `input.cfg`.
@@ -49,6 +50,8 @@ from src.data_io import load_data, load_master_database, merge_and_deduplicate
 from src.calculations import process_grouped_trades, calculate_portfolios
 from src.excel_writer import save_workbook
 from src.corporate_actions import process_splits
+from src.gsheet_writer import save_to_gsheet
+from src.gsheet_dashboard import build_gsheet_dashboard
 
 
 def run_tests() -> bool:
@@ -81,7 +84,7 @@ def run_tests() -> bool:
     return result.wasSuccessful()
 
 
-def main(update_only: bool = False):
+def main(update_only: bool = False, gsheet_target: str = None):
     """
     Main execution pipeline.
 
@@ -136,6 +139,28 @@ def main(update_only: bool = False):
     # Step 7: Save everything to Excel
     save_workbook(df, grouped_df, portfolio_df, overall_df, output_path, benchmark_returns)
 
+    # Step 8: Save to Google Sheets (if requested)
+    if gsheet_target:
+        data_to_export = {
+            "Raw_Tradebook": df,
+            "Transaction": grouped_df,
+            "Current_Portfolio": portfolio_df,
+            "Overall_Portfolio": overall_df
+        }
+        print(f"Exporting to Google Sheets: {gsheet_target}...")
+        
+        # 1. Export Data Sheets
+        save_to_gsheet(data_to_export, gsheet_target)
+        
+        # 2. Build the Styled Dashboard
+        import gspread
+        from google.oauth2.service_account import Credentials
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+        client = gspread.authorize(creds)
+        sh = client.open(gsheet_target)
+        build_gsheet_dashboard(sh, portfolio_df, overall_df, benchmark_returns)
+
 
 if __name__ == "__main__":
     if '--test' in sys.argv:
@@ -182,5 +207,14 @@ if __name__ == "__main__":
                 print("\nWatch mode stopped.")
                 sys.exit(0)
     else:
-        main()
+        gsheet_target = None
+        if '--gsheet' in sys.argv:
+            try:
+                idx = sys.argv.index('--gsheet')
+                gsheet_target = sys.argv[idx + 1]
+            except IndexError:
+                print("Usage: python main.py --gsheet <sheet_name_or_id>")
+                sys.exit(1)
+        
+        main(gsheet_target=gsheet_target)
 
