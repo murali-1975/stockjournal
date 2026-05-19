@@ -102,6 +102,9 @@ def save_workbook(
                 number_format='0.00%'
             )
 
+            # --- Apply conditional formatting based on LTP relationship ---
+            _apply_ltp_comparison_formatting(writer, portfolio_df, 'Current_Portfolio')
+
             # --- Auto-fit columns and freeze panes for readability ---
             for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
                 if sheet in writer.sheets:
@@ -228,4 +231,49 @@ def _auto_fit_columns_and_freeze(writer, sheet_name: str) -> None:
         adjusted_width = max(adjusted_width, 10)
         
         worksheet.column_dimensions[column].width = adjusted_width
+
+
+def _apply_ltp_comparison_formatting(writer, df: pd.DataFrame, sheet_name: str) -> None:
+    """
+    Applies conditional cell coloring to 'Prev_Day_Close' and 'Prev_Week_Close'
+    based on their relationship with 'LTP'.
+    If LTP > Close: Light Green fill ('E2EFDA')
+    Else: Light Pink fill ('FCE4D6')
+    """
+    from openpyxl.styles import PatternFill
+    
+    if sheet_name not in writer.sheets:
+        return
+        
+    worksheet = writer.sheets[sheet_name]
+    
+    # Map column headers to 1-based indices
+    col_map = {col_name: col_idx for col_idx, col_name in enumerate(df.columns, 1)}
+    
+    if 'LTP' not in col_map:
+        return
+        
+    ltp_idx = col_map['LTP']
+    
+    green_fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
+    pink_fill = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
+    
+    for target_col in ['Prev_Day_Close', 'Prev_Week_Close']:
+        if target_col in col_map:
+            target_idx = col_map[target_col]
+            for row in range(2, len(df) + 2):
+                ltp_val = worksheet.cell(row=row, column=ltp_idx).value
+                target_val = worksheet.cell(row=row, column=target_idx).value
+                
+                try:
+                    if ltp_val is not None and target_val is not None:
+                        f_ltp = float(ltp_val)
+                        f_target = float(target_val)
+                        
+                        if f_ltp > f_target:
+                            worksheet.cell(row=row, column=target_idx).fill = green_fill
+                        else:
+                            worksheet.cell(row=row, column=target_idx).fill = pink_fill
+                except (ValueError, TypeError):
+                    pass
 

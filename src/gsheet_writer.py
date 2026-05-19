@@ -129,6 +129,44 @@ def _apply_sheet_styles(worksheet, df):
     data_range = f'A1:{gspread.utils.rowcol_to_a1(len(df)+1, len(df.columns))}'
     formats.append({"range": data_range, "format": cellFormat(borders=borders(top=border('SOLID'), bottom=border('SOLID'), left=border('SOLID'), right=border('SOLID')))})
 
+    # 4. Conditional Formatting for Prev_Day_Close and Prev_Week_Close
+    if worksheet.title == "Current_Portfolio":
+        col_map = {col_name: col_idx for col_idx, col_name in enumerate(df.columns, 1)}
+        if 'LTP' in col_map:
+            ltp_idx = col_map['LTP']
+            green_color = {"red": 226/255, "green": 239/255, "blue": 218/255} # #E2EFDA
+            pink_color = {"red": 252/255, "green": 228/255, "blue": 214/255}  # #FCE4D6
+            
+            for target_col in ['Prev_Day_Close', 'Prev_Week_Close']:
+                if target_col in col_map:
+                    target_idx = col_map[target_col]
+                    target_letter = gspread.utils.rowcol_to_a1(1, target_idx).rstrip('0123456789')
+                    
+                    for r_idx in range(len(df)):
+                        row_num = r_idx + 2
+                        cell_range = f'{target_letter}{row_num}:{target_letter}{row_num}'
+                        
+                        try:
+                            ltp_val = df.iloc[r_idx, ltp_idx - 1]
+                            target_val = df.iloc[r_idx, target_idx - 1]
+                            
+                            if pd.notna(ltp_val) and pd.notna(target_val) and ltp_val != "" and target_val != "":
+                                f_ltp = float(ltp_val)
+                                f_target = float(target_val)
+                                
+                                color = green_color if f_ltp > f_target else pink_color
+                                
+                                formats.append({
+                                    "range": cell_range,
+                                    "format": cellFormat(
+                                        backgroundColor=color,
+                                        numberFormat=numberFormat(type='CURRENCY', pattern='₹#,##0.00'),
+                                        horizontalAlignment='RIGHT'
+                                    )
+                                })
+                        except (ValueError, TypeError):
+                            pass
+
     # Apply all formats in ONE call
     if formats:
         format_cell_ranges(worksheet, [(f['range'], f['format']) for f in formats])
