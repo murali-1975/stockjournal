@@ -49,7 +49,7 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
     """
     import pandas as pd
 
-    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Week_Close': 0.0}
+    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0}
 
     try:
         import yfinance as yf
@@ -91,6 +91,14 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
                     if hasattr(ltp_val, 'item'):
                         ltp_val = ltp_val.item()
                     market_data[sym]['LTP'] = round(float(ltp_val), 2)
+
+                    # Calculate Previous Day Closing Price
+                    prev_day_close = 0.0
+                    if len(valid_series) >= 2:
+                        prev_day_close = valid_series.iloc[-2]
+                        if hasattr(prev_day_close, 'item'):
+                            prev_day_close = prev_day_close.item()
+                    market_data[sym]['Prev_Day_Close'] = round(float(prev_day_close), 2)
 
                     # Calculate Previous Week Closing Price
                     prev_week_close = 0.0

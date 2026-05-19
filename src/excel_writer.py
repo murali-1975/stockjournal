@@ -77,7 +77,7 @@ def save_workbook(
             _apply_number_format(
                 writer, portfolio_df, 'Current_Portfolio',
                 columns=['Average_Buy_Price', 'SL', 'LTP_SL_Diff', 'Invested_Value', 'LTP',
-                         'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21',
+                         'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21',
                          'Current_Value', 'Unrealized_PnL'],
                 number_format=inr_format
             )

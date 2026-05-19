@@ -422,6 +422,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
 
     overall_df['LTP'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('LTP', 0.0))
+    overall_df['Prev_Day_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prev_Day_Close', 0.0))
     overall_df['Prev_Week_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prev_Week_Close', 0.0))
     overall_df['EMA9'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA9', 0.0))
     overall_df['EMA10'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA10', 0.0))
@@ -499,7 +500,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         'Current_Quantity', 'Invested_Value', 'LTP', 'Current_Value',
         'Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage',
         'Holding_Period', 'Split_Info', 'Adj_Required',
-        'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21'
+        'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21'
     ]
     overall_df = overall_df[cols_order].sort_values(by='Symbol')
 
@@ -507,7 +508,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     portfolio_df = overall_df[overall_df['Current_Quantity'] > 0][
         ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
          'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
-         'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
+         'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
          'Holding_Period', 'Split_Info', 'Adj_Required']
     ].copy()
 
@@ -526,11 +527,11 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     port_cols = ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
                  'Current_Quantity', 'Average_Buy_Price', 'SL',
                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
-                 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
+                 'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
                  'Holding_Period', 'Split_Info', 'Adj_Required']
     portfolio_df = portfolio_df[port_cols]
 
-    # Remove EMA and Previous Week Close columns from Overall Portfolio (only needed in Current Portfolio)
-    overall_df = overall_df.drop(columns=['EMA9', 'EMA10', 'EMA11', 'EMA21', 'Prev_Week_Close'])
+    # Remove EMA, Previous Day, and Previous Week Close columns from Overall Portfolio (only needed in Current Portfolio)
+    overall_df = overall_df.drop(columns=['EMA9', 'EMA10', 'EMA11', 'EMA21', 'Prev_Day_Close', 'Prev_Week_Close'])
 
     return portfolio_df, overall_df
