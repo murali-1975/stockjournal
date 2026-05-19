@@ -392,9 +392,15 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     overall_df['Current_Quantity'] = overall_df['Total_Buy_Quantity'] - overall_df['Total_Sell_Quantity']
     overall_df['Invested_Value'] = (overall_df['Current_Quantity'] * overall_df['Average_Buy_Price']).round(2)
 
+    # --- TF Sector & Classification from Equity Master (loaded early for EMA classification) ---
+    equity_master = load_equity_master(config)
+    classifications = {}
+    if equity_master is not None:
+        classifications = dict(zip(equity_master['Symbol'], equity_master['TF_Classification']))
+
     # --- Fetch Market Data (LTP & EMAs) for all symbols ---
     symbols = overall_df['Symbol'].tolist()
-    market_data = fetch_market_data_from_yahoo(symbols)
+    market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
 
     overall_df['LTP'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('LTP', 0.0))
     overall_df['EMA9'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA9', 0.0))
@@ -411,8 +417,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         lambda sym: _get_latest_tranche_cheat(sym, grouped_df)
     )
 
-    # --- TF Sector & Classification from Equity Master ---
-    equity_master = load_equity_master(config)
+    # --- TF Sector & Classification Merge ---
     if equity_master is not None:
         overall_df = overall_df.merge(equity_master, on='Symbol', how='left')
         overall_df['TF_Sector'] = overall_df['TF_Sector'].fillna('')

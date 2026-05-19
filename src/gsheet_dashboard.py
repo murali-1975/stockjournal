@@ -62,6 +62,8 @@ def build_gsheet_dashboard(sh, portfolio_df, overall_df, benchmark_returns=None)
     row, formats = _write_nearest_sl_table(ws, portfolio_df, row, formats)
     row += 2
     row, formats = _write_corporate_actions(ws, portfolio_df, overall_df, row, formats)
+    row += 2
+    row, formats = _write_top_cheats_table(ws, portfolio_df, row, formats)
 
     # Right Side
     rrow = 3
@@ -320,6 +322,43 @@ def _write_corporate_actions(ws, p_df, o_df, r, formats):
         end_r = r + 1 + len(rows)
         ws.update(f'A{r+2}:C{end_r}', rows)
         formats.append({"range": f'A{r+2}:C{end_r}', "format": cellFormat(borders=_thin_borders())})
+    return r + 2 + len(rows), formats
+
+def _write_top_cheats_table(ws, df, r, formats):
+    ws.update(f'A{r}', [['Top 5 Cheat Stocks by Holding Period']])
+    formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
+    ws.update(f'A{r+1}:E{r+1}', [['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value']])
+    formats.append({"range": f'A{r+1}:E{r+1}', "format": _header_style()})
+
+    if 'Latest_Tranche' not in df.columns or df.empty:
+        return r + 2, formats
+
+    cheat_df = df[df['Latest_Tranche'].str.startswith('Cheat', na=False)].copy()
+    if cheat_df.empty:
+        ws.update(f'A{r+2}', [['No active cheat stocks in portfolio']])
+        return r + 3, formats
+
+    top_cheats = cheat_df.sort_values(by='Holding_Period', ascending=False).head(5)
+
+    rows = []
+    for _, s in top_cheats.iterrows():
+        rows.append([
+            s.get('Symbol', ''),
+            s.get('Latest_Tranche', ''),
+            int(s.get('Holding_Period', 0)),
+            float(s.get('Invested_Value', 0)),
+            float(s.get('Current_Value', 0))
+        ])
+
+    if rows:
+        end_r = r + 1 + len(rows)
+        ws.update(f'A{r+2}:E{end_r}', rows)
+        formats.append({"range": f'C{r+2}:C{end_r}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern='0'), horizontalAlignment='RIGHT')})
+        formats.append({"range": f'D{r+2}:E{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
+        formats.append({"range": f'A{r+2}:E{end_r}', "format": cellFormat(borders=_thin_borders())})
+        for i in range(len(rows)):
+            formats.append({"range": f'A{r+2+i}', "format": cellFormat(textFormat=textFormat(bold=True))})
+
     return r + 2 + len(rows), formats
 
 def _header_style():

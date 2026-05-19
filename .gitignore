@@ -15,3 +15,4 @@ env/
 .idea/
 *.pdf
 credentials.json
+scratch/

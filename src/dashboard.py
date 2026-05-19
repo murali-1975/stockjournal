@@ -103,6 +103,8 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     row = _write_nearest_sl_table(ws, portfolio_df, row)
     row += 2
     row = _write_corporate_actions(ws, portfolio_df, overall_df, row)
+    row += 2
+    row = _write_top_cheats_table(ws, portfolio_df, row)
 
     # ══════════════════════════════════════════════════════════════════
     #  RIGHT SIDE (Columns H-K) — Allocation & Distribution tables
@@ -598,6 +600,41 @@ def _write_corporate_actions(ws, portfolio_df, overall_df, row):
         adj = s.get('Adj_Required', 'No')
         _data_cell(ws, row, 3, adj,
                    font=RED_FONT if adj == 'Yes' else None)
+        row += 1
+
+    return row
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Table 11: Top 5 Cheat Stocks (LEFT SIDE)
+# ═══════════════════════════════════════════════════════════════════
+
+def _write_top_cheats_table(ws, df, row):
+    """Writes Top 5 Cheat Stocks by holding period in descending order. Returns next free row."""
+    row = _section_title(ws, row, 1, 'Top 5 Cheat Stocks by Holding Period')
+    row = _styled_header(ws, row, 1, ['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value'])
+
+    if 'Latest_Tranche' not in df.columns or len(df) == 0:
+        _data_cell(ws, row, 1, 'No cheat stocks found')
+        return row + 1
+
+    # Filter for active positions that are Cheat stocks
+    cheat_df = df[df['Latest_Tranche'].str.startswith('Cheat', na=False)].copy()
+    if cheat_df.empty:
+        _data_cell(ws, row, 1, 'No active cheat stocks in portfolio')
+        return row + 1
+
+    # Sort by holding period desc and take top 5
+    top_cheats = cheat_df.sort_values(by='Holding_Period', ascending=False).head(5)
+
+    col_keys = ['Symbol', 'Latest_Tranche', 'Holding_Period', 'Invested_Value', 'Current_Value']
+    formats = [None, None, '0', INR_FMT, INR_FMT]
+
+    for _, s in top_cheats.iterrows():
+        for ci, (key, fmt) in enumerate(zip(col_keys, formats), 1):
+            val = s.get(key, '')
+            font = LABEL_FONT if key == 'Symbol' else VALUE_FONT
+            _data_cell(ws, row, ci, val, fmt=fmt, font=font)
         row += 1
 
     return row

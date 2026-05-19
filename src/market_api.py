@@ -17,16 +17,19 @@ Dependencies:
 """
 
 
-def fetch_market_data_from_yahoo(symbols: list) -> dict:
+def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) -> dict:
     """
     Fetches LTP and EMA data from Yahoo Finance for a list of stock symbols.
 
-    Downloads 3 months of historical daily closing prices and computes
-    Exponential Moving Averages (EMAs) with spans of 9, 10, 11, and 21 days.
+    Downloads historical daily closing prices and computes Exponential Moving Averages
+    (EMAs) with spans of 9, 10, 11, and 21 periods.
+    - Core stocks: Daily closing EMAs (computed on daily historical data).
+    - Satellite stocks: Weekly closing EMAs (resampled to weekly last prices).
 
     Args:
         symbols: A list of NSE stock ticker symbols (without the '.NS' suffix).
                  Example: ['RELIANCE', 'TCS', 'INFY']
+        classifications: Optional dict mapping Symbol to TF_Classification.
 
     Returns:
         A dictionary mapping each original symbol to its market data:
@@ -62,8 +65,8 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
     market_data = {sym: default_data.copy() for sym in symbols}
 
     try:
-        # Download 3 months of data to ensure enough periods for a 21-day EMA
-        data = yf.download(symbol_ns, period="3mo", progress=False)
+        # Download 2 years of data to ensure enough periods for a 21-week EMA (weekly calculations)
+        data = yf.download(symbol_ns, period="2y", progress=False)
 
         if 'Close' in data:
             close_data = data['Close']
@@ -89,10 +92,32 @@ def fetch_market_data_from_yahoo(symbols: list) -> dict:
                         ltp_val = ltp_val.item()
                     market_data[sym]['LTP'] = round(float(ltp_val), 2)
 
-                    ema9 = valid_series.ewm(span=9, adjust=False).mean().iloc[-1]
-                    ema10 = valid_series.ewm(span=10, adjust=False).mean().iloc[-1]
-                    ema11 = valid_series.ewm(span=11, adjust=False).mean().iloc[-1]
-                    ema21 = valid_series.ewm(span=21, adjust=False).mean().iloc[-1]
+                    # Determine if it's a Satellite stock
+                    is_satellite = False
+                    if classifications:
+                        class_val = classifications.get(sym, '')
+                        if isinstance(class_val, str) and 'satellite' in class_val.lower():
+                            is_satellite = True
+
+                    # Apply weekly closing logic for Satellite stocks if index is DatetimeIndex
+                    if is_satellite and isinstance(valid_series.index, pd.DatetimeIndex):
+                        ema_series = valid_series.resample('W').last().dropna()
+                    else:
+                        ema_series = valid_series
+
+                    # Compute EMAs
+                    if not ema_series.empty:
+                        ema9 = ema_series.ewm(span=9, adjust=False).mean().iloc[-1]
+                        ema10 = ema_series.ewm(span=10, adjust=False).mean().iloc[-1]
+                        ema11 = ema_series.ewm(span=11, adjust=False).mean().iloc[-1]
+                        ema21 = ema_series.ewm(span=21, adjust=False).mean().iloc[-1]
+                    else:
+                        # Fallback to daily if resampled is empty
+                        ema9 = valid_series.ewm(span=9, adjust=False).mean().iloc[-1]
+                        ema10 = valid_series.ewm(span=10, adjust=False).mean().iloc[-1]
+                        ema11 = valid_series.ewm(span=11, adjust=False).mean().iloc[-1]
+                        ema21 = valid_series.ewm(span=21, adjust=False).mean().iloc[-1]
+
                     for ema_key, ema_val in [('EMA9', ema9), ('EMA10', ema10), ('EMA11', ema11), ('EMA21', ema21)]:
                         if hasattr(ema_val, 'item'):
                             ema_val = ema_val.item()
