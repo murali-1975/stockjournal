@@ -49,7 +49,7 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
     """
     import pandas as pd
 
-    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0}
+    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Week_Close': 0.0}
 
     try:
         import yfinance as yf
@@ -91,6 +91,16 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
                     if hasattr(ltp_val, 'item'):
                         ltp_val = ltp_val.item()
                     market_data[sym]['LTP'] = round(float(ltp_val), 2)
+
+                    # Calculate Previous Week Closing Price
+                    prev_week_close = 0.0
+                    if isinstance(valid_series.index, pd.DatetimeIndex):
+                        w_series = valid_series.resample('W').last().dropna()
+                        if len(w_series) >= 2:
+                            prev_week_close = w_series.iloc[-2]
+                            if hasattr(prev_week_close, 'item'):
+                                prev_week_close = prev_week_close.item()
+                    market_data[sym]['Prev_Week_Close'] = round(float(prev_week_close), 2)
 
                     # Determine if it's a Satellite stock
                     is_satellite = False

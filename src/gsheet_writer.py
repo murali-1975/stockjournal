@@ -111,7 +111,7 @@ def _apply_sheet_styles(worksheet, df):
         col_range = f'{col_letter}2:{col_letter}1000'
         
         # Detection logic
-        is_num = any(x in col.upper() for x in ['VALUE', 'PRICE', 'PNL', 'LTP', 'SL', 'EMA', 'QTY', 'QUANTITY', 'HOLDING'])
+        is_num = any(x in col.upper() for x in ['VALUE', 'PRICE', 'PNL', 'LTP', 'SL', 'EMA', 'QTY', 'QUANTITY', 'HOLDING', 'CLOSE'])
         is_pct = 'PCT' in col.upper() or '%' in col
         is_int = any(x in col.upper() for x in ['QTY', 'QUANTITY', 'COUNT', 'ID'])
         
