@@ -105,6 +105,19 @@ class TestProcessGroupedTrades(unittest.TestCase):
         # Total qty=20, Total value=35000+36000=71000, Avg=3550.00
         self.assertEqual(result.iloc[0]['Average_Price'], 3550.0)
 
+    def test_cheat_reinitialization_on_full_exit(self):
+        """If a stock is fully sold out, the next buy should reset Tranche/Cheat counts to 1."""
+        df = self._make_trades([
+            ('2025-01-01', 'RELIANCE', 'buy', 40, 2500),  # 100,000 → Tranch 1
+            ('2025-01-02', 'RELIANCE', 'buy', 40, 2500),  # 100,000 → Tranch 2
+            ('2025-01-03', 'RELIANCE', 'sell', 80, 2600), # 80 qty sold → fully exited (holdings = 0)
+            ('2025-01-04', 'RELIANCE', 'buy', 40, 2500),  # 100,000 → should reset to Tranch 1 (not Tranch 3)
+        ])
+        config = {'TRANCH': 100000, 'CHEAT': 75000, 'TRANCH_TOLERANCE': 0.10}
+        result = process_grouped_trades(df, config)
+        labels = result.sort_values('Trade Date')['Tranches/Cheat'].tolist()
+        self.assertEqual(labels, ['Tranch 1', 'Tranch 2', 'N/A', 'Tranch 1'])
+
 
 class TestStopLoss(unittest.TestCase):
     """Test suite for the _get_stop_loss function."""

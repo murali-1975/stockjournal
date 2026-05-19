@@ -78,9 +78,28 @@ def process_grouped_trades(df: pd.DataFrame, config: dict = None) -> pd.DataFram
             symbol = row['Symbol']
             trade_type = str(row['Trade Type']).lower()
             total_value = row['Total_Value']
+            total_quantity = row['Total_Quantity']
 
             if symbol not in symbol_state:
-                symbol_state[symbol] = {'tranch_count': 0, 'cheat_count': 0, 'accumulated_cheat_value': 0}
+                symbol_state[symbol] = {
+                    'tranch_count': 0,
+                    'cheat_count': 0,
+                    'accumulated_cheat_value': 0.0,
+                    'current_quantity': 0.0
+                }
+
+            # Update quantity trackers chronologically to detect full exit reset triggers
+            if trade_type == 'buy':
+                if symbol_state[symbol]['current_quantity'] <= 1e-5:
+                    symbol_state[symbol]['tranch_count'] = 0
+                    symbol_state[symbol]['cheat_count'] = 0
+                    symbol_state[symbol]['accumulated_cheat_value'] = 0.0
+                    symbol_state[symbol]['current_quantity'] = 0.0
+                symbol_state[symbol]['current_quantity'] += total_quantity
+            elif trade_type == 'sell':
+                symbol_state[symbol]['current_quantity'] -= total_quantity
+                if symbol_state[symbol]['current_quantity'] < 1e-5:
+                    symbol_state[symbol]['current_quantity'] = 0.0
 
             if trade_type != 'buy':
                 labels.append('N/A')
