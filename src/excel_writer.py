@@ -235,12 +235,14 @@ def _auto_fit_columns_and_freeze(writer, sheet_name: str) -> None:
 
 def _apply_ltp_comparison_formatting(writer, df: pd.DataFrame, sheet_name: str) -> None:
     """
-    Applies conditional cell coloring to 'Prev_Day_Close' and 'Prev_Week_Close'
+    Applies native, dynamic conditional formatting to 'Prev_Day_Close' and 'Prev_Week_Close'
     based on their relationship with 'LTP'.
     If LTP > Close: Light Green fill ('E2EFDA')
     Else: Light Pink fill ('FCE4D6')
     """
     from openpyxl.styles import PatternFill
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.utils import get_column_letter
     
     if sheet_name not in writer.sheets:
         return
@@ -254,6 +256,7 @@ def _apply_ltp_comparison_formatting(writer, df: pd.DataFrame, sheet_name: str) 
         return
         
     ltp_idx = col_map['LTP']
+    ltp_letter = get_column_letter(ltp_idx)
     
     green_fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
     pink_fill = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
@@ -261,19 +264,18 @@ def _apply_ltp_comparison_formatting(writer, df: pd.DataFrame, sheet_name: str) 
     for target_col in ['Prev_Day_Close', 'Prev_Week_Close']:
         if target_col in col_map:
             target_idx = col_map[target_col]
-            for row in range(2, len(df) + 2):
-                ltp_val = worksheet.cell(row=row, column=ltp_idx).value
-                target_val = worksheet.cell(row=row, column=target_idx).value
-                
-                try:
-                    if ltp_val is not None and target_val is not None:
-                        f_ltp = float(ltp_val)
-                        f_target = float(target_val)
-                        
-                        if f_ltp > f_target:
-                            worksheet.cell(row=row, column=target_idx).fill = green_fill
-                        else:
-                            worksheet.cell(row=row, column=target_idx).fill = pink_fill
-                except (ValueError, TypeError):
-                    pass
+            target_letter = get_column_letter(target_idx)
+            
+            # Target range from row 2 to end of data
+            range_str = f"{target_letter}2:{target_letter}{len(df) + 1}"
+            
+            # Formulas adapted for row 2 (relative rows so Excel propagates them)
+            green_formula = f"=${ltp_letter}2>${target_letter}2"
+            pink_formula = f"=${ltp_letter}2<=${target_letter}2"
+            
+            green_rule = FormulaRule(formula=[green_formula], fill=green_fill)
+            pink_rule = FormulaRule(formula=[pink_formula], fill=pink_fill)
+            
+            worksheet.conditional_formatting.add(range_str, green_rule)
+            worksheet.conditional_formatting.add(range_str, pink_rule)
 
