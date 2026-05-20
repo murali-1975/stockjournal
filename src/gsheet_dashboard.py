@@ -22,6 +22,59 @@ INR_FMT = "₹#,##0.00"
 PCT_FMT = "0.00%"
 NUM_FMT = "#,##0"
 
+
+def _grid_write(grid, start_cell, values):
+    """
+    Writes a 2D list of values, a 1D list, or a single scalar into our 
+    in-memory grid starting at the specified A1 cell coordinate.
+    """
+    # 1. Parse Column and Row from cell reference (e.g., 'A1' or 'I12')
+    col_str = ""
+    row_str = ""
+    for char in start_cell:
+        if char.isalpha():
+            col_str += char
+        else:
+            row_str += char
+            
+    col_idx = 0
+    for char in col_str:
+        col_idx = col_idx * 26 + (ord(char.upper()) - ord('A') + 1)
+    col_idx -= 1
+    row_idx = int(row_str) - 1
+
+    # 2. Convert values input to standardized list-of-lists
+    if not isinstance(values, list):
+        values = [[values]]
+    elif len(values) == 0:
+        return
+    elif not isinstance(values[0], list):
+        values = [values]
+
+    # 3. Write into the grid structure
+    for r_offset, row_vals in enumerate(values):
+        grid_row = row_idx + r_offset
+        # Ensure row exists in grid
+        while len(grid) <= grid_row:
+            grid.append(["" for _ in range(13)])
+            
+        for c_offset, val in enumerate(row_vals):
+            grid_col = col_idx + c_offset
+            # Ensure column exists in that row
+            while len(grid[grid_row]) <= grid_col:
+                grid[grid_row].append("")
+            
+            # Format numbers to standard float/int or clean string for JSON compatibility
+            if pd.isna(val):
+                grid[grid_row][grid_col] = ""
+            elif isinstance(val, (np.integer, int)):
+                grid[grid_row][grid_col] = int(val)
+            elif isinstance(val, (np.floating, float)):
+                grid[grid_row][grid_col] = float(val)
+            else:
+                grid[grid_row][grid_col] = str(val)
+
+
 def build_gsheet_dashboard(sh, portfolio_df, overall_df, benchmark_returns=None):
     print("  -> Rebuilding Hardened Mirror Dashboard...")
     
@@ -46,53 +99,68 @@ def build_gsheet_dashboard(sh, portfolio_df, overall_df, benchmark_returns=None)
         ('I', 220), ('J', 130), ('K', 120), ('L', 120), ('M', 120)
     ])
 
-    ws.update('A1', [['📊 Portfolio Dashboard']])
+    # Initialize the in-memory grid (250 rows, 13 columns A-M)
+    grid = [["" for _ in range(13)] for _ in range(250)]
+
+    _grid_write(grid, 'A1', [['📊 Portfolio Dashboard']])
     formats.append({"range": "A1:G1", "format": cellFormat(textFormat=textFormat(bold=True, fontSize=18, foregroundColor=SECTION_FG), horizontalAlignment='CENTER')})
     
     if not overall_df.empty:
-        ws.update('J2', [[f"🕒 Last Transacted Date: {pd.Timestamp.now().strftime('%d %b %Y')}"]])
+        last_date_str = f"🕒 Last Transacted Date: {pd.Timestamp.now().strftime('%d %b %Y')}"
+        _grid_write(grid, 'J2', [[last_date_str]])
         formats.append({"range": "J2:M2", "format": cellFormat(textFormat=textFormat(italic=True, fontSize=10), horizontalAlignment='RIGHT')})
 
     # Left Side
     row = 3
-    row, formats = _write_kpi_table(ws, portfolio_df, overall_df, row, formats)
+    row, formats = _write_kpi_table(grid, portfolio_df, overall_df, row, formats)
     row += 2
-    row, formats = _write_top_bottom_table(ws, portfolio_df, row, formats)
+    row, formats = _write_top_bottom_table(grid, portfolio_df, row, formats)
     row += 2
-    row, formats = _write_nearest_sl_table(ws, portfolio_df, row, formats)
+    row, formats = _write_nearest_sl_table(grid, portfolio_df, row, formats)
     row += 2
-    row, formats = _write_corporate_actions(ws, portfolio_df, overall_df, row, formats)
+    row, formats = _write_corporate_actions(grid, portfolio_df, overall_df, row, formats)
     row += 2
-    row, formats = _write_top_cheats_table(ws, portfolio_df, row, formats)
+    row, formats = _write_top_cheats_table(grid, portfolio_df, row, formats)
 
     # Right Side
     rrow = 3
     if benchmark_returns:
-        rrow, formats = _write_benchmark_returns_table(ws, benchmark_returns, rrow, formats)
+        rrow, formats = _write_benchmark_returns_table(grid, benchmark_returns, rrow, formats)
         rrow += 2
-    rrow, formats = _write_cap_allocation(ws, portfolio_df, rrow, formats)
+    rrow, formats = _write_cap_allocation(grid, portfolio_df, rrow, formats)
     rrow += 2
-    rrow, formats = _write_core_satellite_distribution(ws, portfolio_df, rrow, formats)
+    rrow, formats = _write_core_satellite_distribution(grid, portfolio_df, rrow, formats)
     rrow += 2
-    rrow, formats = _write_sector_allocation(ws, portfolio_df, rrow, formats)
+    rrow, formats = _write_sector_allocation(grid, portfolio_df, rrow, formats)
     rrow += 2
-    rrow, formats = _write_sector_allocation_core_satellite(ws, portfolio_df, rrow, formats)
+    rrow, formats = _write_sector_allocation_core_satellite(grid, portfolio_df, rrow, formats)
     rrow += 2
-    rrow, formats = _write_pnl_breakdown_by_cap(ws, overall_df, rrow, formats)
+    rrow, formats = _write_pnl_breakdown_by_cap(grid, overall_df, rrow, formats)
     rrow += 2
-    rrow, formats = _write_tranche_distribution(ws, portfolio_df, rrow, formats)
+    rrow, formats = _write_tranche_distribution(grid, portfolio_df, rrow, formats)
     rrow += 2
-    rrow, formats = _write_holding_distribution(ws, portfolio_df, rrow, formats)
+    rrow, formats = _write_holding_distribution(grid, portfolio_df, rrow, formats)
+
+    # Write the entire grid in ONE single API call
+    # Find actual populated height of the grid to avoid blank trailing rows
+    max_row_populated = len(grid)
+    while max_row_populated > 0 and all(x == "" for x in grid[max_row_populated - 1]):
+        max_row_populated -= 1
+        
+    if max_row_populated > 0:
+        grid_to_update = grid[:max_row_populated]
+        ws.update(f'A1:M{max_row_populated}', grid_to_update)
 
     if formats:
         # Batch apply ALL formatting at once
         format_cell_ranges(ws, [(f['range'], f['format']) for f in formats])
     print("  -> Hardened Dashboard Complete.")
 
-def _write_kpi_table(ws, p_df, o_df, r, formats):
-    ws.update(f'A{r}', [['Portfolio Summary']])
+
+def _write_kpi_table(grid, p_df, o_df, r, formats):
+    _grid_write(grid, f'A{r}', [['Portfolio Summary']])
     formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'A{r+1}:B{r+1}', [['Metric', 'Value']])
+    _grid_write(grid, f'A{r+1}', [['Metric', 'Value']])
     formats.append({"range": f'A{r+1}:B{r+1}', "format": _header_style()})
 
     ti = p_df['Invested_Value'].sum() if 'Invested_Value' in p_df.columns else 0
@@ -113,7 +181,7 @@ def _write_kpi_table(ws, p_df, o_df, r, formats):
         ['Active Holdings', int(len(p_df))],
         ['Total Stocks Traded', int(len(o_df))]
     ]
-    ws.update(f'A{r+2}:B{r+11}', data)
+    _grid_write(grid, f'A{r+2}', data)
     
     formats.append({"range": f'B{r+2}:B{r+6}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'B{r+7}:B{r+9}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
@@ -123,10 +191,11 @@ def _write_kpi_table(ws, p_df, o_df, r, formats):
     formats.append({"range": f'A{r+2}:B{r+11}', "format": cellFormat(borders=_thin_borders())})
     return r + 13, formats
 
-def _write_top_bottom_table(ws, df, r, formats):
-    ws.update(f'A{r}', [['Top 5 Gainers / Bottom 5 Losers']])
+
+def _write_top_bottom_table(grid, df, r, formats):
+    _grid_write(grid, f'A{r}', [['Top 5 Gainers / Bottom 5 Losers']])
     formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'A{r+1}:F{r+1}', [['Symbol', 'Classification', 'Invested (₹)', 'Current (₹)', 'PnL (₹)', 'PnL %']])
+    _grid_write(grid, f'A{r+1}', [['Symbol', 'Classification', 'Invested (₹)', 'Current (₹)', 'PnL (₹)', 'PnL %']])
     formats.append({"range": f'A{r+1}:F{r+1}', "format": _header_style()})
 
     if df.empty: return r + 2, formats
@@ -142,7 +211,7 @@ def _write_top_bottom_table(ws, df, r, formats):
     
     if rows:
         end_r = r + 1 + len(rows)
-        ws.update(f'A{r+2}:F{end_r}', rows)
+        _grid_write(grid, f'A{r+2}', rows)
         formats.append({"range": f'C{r+2}:E{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
         formats.append({"range": f'F{r+2}:F{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
         for i, row_data in enumerate(rows):
@@ -152,31 +221,33 @@ def _write_top_bottom_table(ws, df, r, formats):
         formats.append({"range": f'A{r+2}:F{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_nearest_sl_table(ws, df, r, formats):
-    ws.update(f'A{r}', [['⚠️ Stocks Nearest to Stop Loss']])
+
+def _write_nearest_sl_table(grid, df, r, formats):
+    _grid_write(grid, f'A{r}', [['⚠️ Stocks Nearest to Stop Loss']])
     formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=RED_FG))})
-    ws.update(f'A{r+1}:G{r+1}', [['Symbol', 'Classification', 'LTP', 'SL', 'Diff (₹)', 'Diff (%)', 'Tranche']])
+    _grid_write(grid, f'A{r+1}', [['Symbol', 'Classification', 'LTP', 'SL', 'Diff (₹)', 'Diff (%)', 'Tranche']])
     formats.append({"range": f'A{r+1}:G{r+1}', "format": _header_style()})
     if 'LTP_SL_Diff_Pct' not in df.columns or df.empty: return r + 2, formats
     near = df.nsmallest(10, 'LTP_SL_Diff_Pct')
     rows = [[s.get('Symbol',''), s.get('TF_Classification','Satellite'), float(s.get('LTP',0)), float(s.get('SL',0)), float(s.get('LTP_SL_Diff',0)), float(s.get('LTP_SL_Diff_Pct',0)), s.get('Latest_Tranche','')] for _,s in near.iterrows()]
     if rows:
         end_r = r + 1 + len(rows)
-        ws.update(f'A{r+2}:G{end_r}', rows)
+        _grid_write(grid, f'A{r+2}', rows)
         formats.append({"range": f'C{r+2}:E{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
         formats.append({"range": f'F{r+2}:F{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
         formats.append({"range": f'A{r+2}:G{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_benchmark_returns_table(ws, bench, r, formats):
-    ws.update(f'I{r}', [['📈 Benchmark Returns (Since Invest Start)']])
+
+def _write_benchmark_returns_table(grid, bench, r, formats):
+    _grid_write(grid, f'I{r}', [['📈 Benchmark Returns (Since Invest Start)']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:L{r+1}', [['Index Tracker (ETF)', 'Start Price (₹)', 'LTP (₹)', 'Return %']])
+    _grid_write(grid, f'I{r+1}', [['Index Tracker (ETF)', 'Start Price (₹)', 'LTP (₹)', 'Return %']])
     formats.append({"range": f'I{r+1}:L{r+1}', "format": _header_style()})
     rows = [[k, float(v.get('Start_Price',0)), float(v.get('LTP',0)), float(v.get('Return_Pct',0))] for k,v in bench.items()]
     if rows:
         end_r = r + 1 + len(rows)
-        ws.update(f'I{r+2}:L{end_r}', rows)
+        _grid_write(grid, f'I{r+2}', rows)
         formats.append({"range": f'J{r+2}:K{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
         formats.append({"range": f'L{r+2}:L{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
         for i, rd in enumerate(rows):
@@ -184,10 +255,11 @@ def _write_benchmark_returns_table(ws, bench, r, formats):
         formats.append({"range": f'I{r+2}:L{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_cap_allocation(ws, df, r, formats):
-    ws.update(f'I{r}', [['Allocation by Market Cap']])
+
+def _write_cap_allocation(grid, df, r, formats):
+    _grid_write(grid, f'I{r}', [['Allocation by Market Cap']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:L{r+1}', [['Market Cap', 'Invested (₹)', '% of Total', 'Returns']])
+    _grid_write(grid, f'I{r+1}', [['Market Cap', 'Invested (₹)', '% of Total', 'Returns']])
     formats.append({"range": f'I{r+1}:L{r+1}', "format": _header_style()})
     if 'Cap' not in df.columns: return r + 2, formats
     grouped = df.groupby('Cap', dropna=False).agg({'Invested_Value': 'sum', 'Unrealized_PnL': 'sum'}).sort_values('Invested_Value', ascending=False)
@@ -195,51 +267,54 @@ def _write_cap_allocation(ws, df, r, formats):
     rows = [[str(k) if pd.notna(k) and k!='' else '', float(v['Invested_Value']), float(v['Invested_Value']/total_i if total_i > 0 else 0), float(v['Unrealized_PnL']/v['Invested_Value'] if v['Invested_Value'] > 0 else 0)] for k,v in grouped.iterrows()]
     rows.append(['TOTAL', float(total_i), 1.0, float(grouped['Unrealized_PnL'].sum()/total_i if total_i > 0 else 0)])
     end_r = r + 1 + len(rows)
-    ws.update(f'I{r+2}:L{end_r}', rows)
+    _grid_write(grid, f'I{r+2}', rows)
     formats.append({"range": f'J{r+2}:J{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'K{r+2}:L{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'I{end_r}:L{end_r}', "format": cellFormat(textFormat=textFormat(bold=True))})
     formats.append({"range": f'I{r+2}:L{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_core_satellite_distribution(ws, df, r, formats):
-    ws.update(f'I{r}', [['Core & Satellite Distribution']])
+
+def _write_core_satellite_distribution(grid, df, r, formats):
+    _grid_write(grid, f'I{r}', [['Core & Satellite Distribution']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:K{r+1}', [['Classification', 'Invested (₹)', '% of Total']])
+    _grid_write(grid, f'I{r+1}', [['Classification', 'Invested (₹)', '% of Total']])
     formats.append({"range": f'I{r+1}:K{r+1}', "format": _header_style()})
     grouped = df.groupby('TF_Classification').agg({'Invested_Value': 'sum'}).sort_values('Invested_Value', ascending=False)
     total = grouped['Invested_Value'].sum()
     rows = [[str(k), float(v['Invested_Value']), float(v['Invested_Value']/total if total > 0 else 0)] for k, v in grouped.iterrows()]
     rows.append(['TOTAL', float(total), 1.0])
     end_r = r + 1 + len(rows)
-    ws.update(f'I{r+2}:K{end_r}', rows)
+    _grid_write(grid, f'I{r+2}', rows)
     formats.append({"range": f'J{r+2}:J{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'K{r+2}:K{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'I{end_r}:K{end_r}', "format": cellFormat(textFormat=textFormat(bold=True))})
     formats.append({"range": f'I{r+2}:K{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_sector_allocation(ws, df, r, formats):
-    ws.update(f'I{r}', [['Allocation by Sector']])
+
+def _write_sector_allocation(grid, df, r, formats):
+    _grid_write(grid, f'I{r}', [['Allocation by Sector']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:K{r+1}', [['Sector', 'Invested (₹)', '% of Total']])
+    _grid_write(grid, f'I{r+1}', [['Sector', 'Invested (₹)', '% of Total']])
     formats.append({"range": f'I{r+1}:K{r+1}', "format": _header_style()})
     grouped = df.groupby('TF_Sector')['Invested_Value'].sum().sort_values(ascending=False)
     total = grouped.sum()
     rows = [[str(k), float(v), float(v/total if total > 0 else 0)] for k,v in grouped.items()]
     rows.append(['TOTAL', float(total), 1.0])
     end_r = r + 1 + len(rows)
-    ws.update(f'I{r+2}:K{end_r}', rows)
+    _grid_write(grid, f'I{r+2}', rows)
     formats.append({"range": f'J{r+2}:K{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'K{r+2}:K{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'I{end_r}:K{end_r}', "format": cellFormat(textFormat=textFormat(bold=True))})
     formats.append({"range": f'I{r+2}:K{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_sector_allocation_core_satellite(ws, df, r, formats):
-    ws.update(f'I{r}', [['Sector Allocation (Core vs Satellite)']])
+
+def _write_sector_allocation_core_satellite(grid, df, r, formats):
+    _grid_write(grid, f'I{r}', [['Sector Allocation (Core vs Satellite)']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:L{r+1}', [['Sector', 'Core (₹)', 'Satellite (₹)', 'Total (₹)']])
+    _grid_write(grid, f'I{r+1}', [['Sector', 'Core (₹)', 'Satellite (₹)', 'Total (₹)']])
     formats.append({"range": f'I{r+1}:L{r+1}', "format": _header_style()})
     
     # Robust Pivot: Ensure all classifications are summed into Total even if labels mismatch
@@ -253,23 +328,24 @@ def _write_sector_allocation_core_satellite(ws, df, r, formats):
     rows.append(['TOTAL', float(pivot['Core'].sum()), float(pivot['Satellite'].sum()), float(pivot['Total'].sum())])
     
     end_r = r + 1 + len(rows)
-    ws.update(f'I{r+2}:L{end_r}', rows)
+    _grid_write(grid, f'I{r+2}', rows)
     formats.append({"range": f'J{r+2}:L{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'I{end_r}:L{end_r}', "format": cellFormat(textFormat=textFormat(bold=True))})
     formats.append({"range": f'I{r+2}:L{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_pnl_breakdown_by_cap(ws, o_df, r, formats):
-    ws.update(f'I{r}', [['PnL Breakdown by Cap']])
+
+def _write_pnl_breakdown_by_cap(grid, o_df, r, formats):
+    _grid_write(grid, f'I{r}', [['PnL Breakdown by Cap']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:L{r+1}', [['Cap', 'Realized PnL', 'Unrealized PnL', 'Total PnL']])
+    _grid_write(grid, f'I{r+1}', [['Cap', 'Realized PnL', 'Unrealized PnL', 'Total PnL']])
     formats.append({"range": f'I{r+1}:L{r+1}', "format": _header_style()})
     grouped = o_df.groupby('Cap', dropna=False).agg({'Realized_PnL': 'sum', 'Unrealized_PnL': 'sum'})
     grouped['Total'] = grouped['Realized_PnL'] + grouped['Unrealized_PnL']
     rows = [[str(cap) if pd.notna(cap) and cap!='' else '', float(v['Realized_PnL']), float(v['Unrealized_PnL']), float(v['Total'])] for cap, v in grouped.iterrows()]
     rows.append(['TOTAL', float(grouped['Realized_PnL'].sum()), float(grouped['Unrealized_PnL'].sum()), float(grouped['Total'].sum())])
     end_r = r + 1 + len(rows)
-    ws.update(f'I{r+2}:L{end_r}', rows)
+    _grid_write(grid, f'I{r+2}', rows)
     formats.append({"range": f'J{r+2}:L{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
     for i, rd in enumerate(rows):
         for ci in range(1, 4):
@@ -279,55 +355,59 @@ def _write_pnl_breakdown_by_cap(ws, o_df, r, formats):
     formats.append({"range": f'I{r+2}:L{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_tranche_distribution(ws, df, r, formats):
-    ws.update(f'I{r}', [['Tranche Distribution']])
+
+def _write_tranche_distribution(grid, df, r, formats):
+    _grid_write(grid, f'I{r}', [['Tranche Distribution']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:K{r+1}', [['Tranche', 'Count', '% of Holdings']])
+    _grid_write(grid, f'I{r+1}', [['Tranche', 'Count', '% of Holdings']])
     formats.append({"range": f'I{r+1}:K{r+1}', "format": _header_style()})
     cnts = df['Latest_Tranche'].value_counts().sort_index()
     total = cnts.sum()
     rows = [[str(k), int(v), float(v/total if total > 0 else 0)] for k,v in cnts.items()]
     if rows:
         end_r = r + 1 + len(rows)
-        ws.update(f'I{r+2}:K{end_r}', rows)
+        _grid_write(grid, f'I{r+2}', rows)
         formats.append({"range": f'J{r+2}:J{end_r}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern=NUM_FMT), horizontalAlignment='RIGHT')})
         formats.append({"range": f'K{r+2}:K{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
         formats.append({"range": f'I{r+2}:K{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_holding_distribution(ws, df, r, formats):
-    ws.update(f'I{r}', [['Holding Period Distribution']])
+
+def _write_holding_distribution(grid, df, r, formats):
+    _grid_write(grid, f'I{r}', [['Holding Period Distribution']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'I{r+1}:K{r+1}', [['Period', 'Count', '% of Holdings']])
+    _grid_write(grid, f'I{r+1}', [['Period', 'Count', '% of Holdings']])
     formats.append({"range": f'I{r+1}:K{r+1}', "format": _header_style()})
     hp = df['Holding_Period']
     bk = [('0-30 days', int(((hp>=0)&(hp<=30)).sum())), ('31-90 days', int(((hp>30)&(hp<=90)).sum())), ('91-180 days', int(((hp>90)&(hp<=180)).sum())), ('180+ days', int((hp>180).sum()))]
     total = len(df)
     rows = [[label, cnt, float(cnt/total if total > 0 else 0)] for label, cnt in bk]
-    ws.update(f'I{r+2}:K{r+5}', rows)
+    _grid_write(grid, f'I{r+2}', rows)
     formats.append({"range": f'J{r+2}:J{r+5}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern=NUM_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'K{r+2}:K{r+5}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
     formats.append({"range": f'I{r+2}:K{r+5}', "format": cellFormat(borders=_thin_borders())})
     return r + 7, formats
 
-def _write_corporate_actions(ws, p_df, o_df, r, formats):
-    ws.update(f'A{r}', [['🔔 Corporate Actions (Splits / Bonus)']])
+
+def _write_corporate_actions(grid, p_df, o_df, r, formats):
+    _grid_write(grid, f'A{r}', [['🔔 Corporate Actions (Splits / Bonus)']])
     formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'A{r+1}:C{r+1}', [['Symbol', 'Split / Bonus Details', 'Adj Required']])
+    _grid_write(grid, f'A{r+1}', [['Symbol', 'Split / Bonus Details', 'Adj Required']])
     formats.append({"range": f'A{r+1}:C{r+1}', "format": _header_style()})
     comb = pd.concat([p_df, o_df]).drop_duplicates(subset='Symbol')
     acts = comb[comb['Split_Info'] != ''].sort_values('Symbol')
     rows = [[str(s.get('Symbol','')), s.get('Split_Info',''), s.get('Adj_Required','No')] for _,s in acts.iterrows()]
     if rows:
         end_r = r + 1 + len(rows)
-        ws.update(f'A{r+2}:C{end_r}', rows)
+        _grid_write(grid, f'A{r+2}', rows)
         formats.append({"range": f'A{r+2}:C{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
-def _write_top_cheats_table(ws, df, r, formats):
-    ws.update(f'A{r}', [['Top 5 Cheat Stocks by Holding Period']])
+
+def _write_top_cheats_table(grid, df, r, formats):
+    _grid_write(grid, f'A{r}', [['Top 5 Cheat Stocks by Holding Period']])
     formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    ws.update(f'A{r+1}:E{r+1}', [['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value']])
+    _grid_write(grid, f'A{r+1}', [['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value']])
     formats.append({"range": f'A{r+1}:E{r+1}', "format": _header_style()})
 
     if 'Latest_Tranche' not in df.columns or df.empty:
@@ -335,7 +415,7 @@ def _write_top_cheats_table(ws, df, r, formats):
 
     cheat_df = df[df['Latest_Tranche'].str.startswith('Cheat', na=False)].copy()
     if cheat_df.empty:
-        ws.update(f'A{r+2}', [['No active cheat stocks in portfolio']])
+        _grid_write(grid, f'A{r+2}', [['No active cheat stocks in portfolio']])
         return r + 3, formats
 
     top_cheats = cheat_df.sort_values(by='Holding_Period', ascending=False).head(5)
@@ -352,7 +432,7 @@ def _write_top_cheats_table(ws, df, r, formats):
 
     if rows:
         end_r = r + 1 + len(rows)
-        ws.update(f'A{r+2}:E{end_r}', rows)
+        _grid_write(grid, f'A{r+2}', rows)
         formats.append({"range": f'C{r+2}:C{end_r}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern='0'), horizontalAlignment='RIGHT')})
         formats.append({"range": f'D{r+2}:E{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
         formats.append({"range": f'A{r+2}:E{end_r}', "format": cellFormat(borders=_thin_borders())})
@@ -361,8 +441,10 @@ def _write_top_cheats_table(ws, df, r, formats):
 
     return r + 2 + len(rows), formats
 
+
 def _header_style():
     return cellFormat(backgroundColor=HEADER_BG, textFormat=textFormat(foregroundColor=HEADER_FG, bold=True), horizontalAlignment='CENTER', borders=borders(top=border('SOLID'), bottom=border('SOLID'), left=border('SOLID'), right=border('SOLID')))
+
 
 def _thin_borders():
     return borders(top=border('SOLID'), bottom=border('SOLID'), left=border('SOLID'), right=border('SOLID'))
