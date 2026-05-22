@@ -87,6 +87,10 @@ def save_to_gsheet(data_frames, sheet_name_or_id, credentials_path="credentials.
         # --- Apply Professional Styling ---
         _apply_sheet_styles(worksheet, clean_df)
 
+        # --- Apply custom color formatting for Satellite stocks based on Satellite_Watchlist ---
+        if tab_name == 'Current_Portfolio':
+            _apply_gsheet_satellite_colors(sh, worksheet, clean_df)
+
     print(f"Successfully exported to Google Sheets: {sh.url}")
 
 def _apply_sheet_styles(worksheet, df):
@@ -184,3 +188,89 @@ def _apply_sheet_styles(worksheet, df):
         ])
     except:
         pass
+
+
+def _apply_gsheet_satellite_colors(sh, current_portfolio_ws, df):
+    """
+    Reads the Satellite_Watchlist sheet from the Google Sheet, finds the latest
+    color code per stock symbol, and styles the Symbol column in the Current_Portfolio
+    sheet with premium light background and dark text colors.
+    """
+    from gspread_formatting import cellFormat, textFormat, color, format_cell_ranges
+    import pandas as pd
+    
+    # Predefined color mappings in float RGB for Google Sheets Color API
+    GS_COLOR_MAP = {
+        'BLUE':   {'bg': (221/255, 235/255, 247/255), 'font': (31/255, 78/255, 120/255)},
+        'ORANGE': {'bg': (252/255, 228/255, 214/255), 'font': (198/255, 89/255, 17/255)},
+        'GREEN':  {'bg': (226/255, 239/255, 218/255), 'font': (55/255, 86/255, 35/255)},
+        'RED':    {'bg': (250/255, 219/255, 216/255), 'font': (169/255, 50/255, 38/255)},
+        'PINK':   {'bg': (250/255, 219/255, 216/255), 'font': (169/255, 50/255, 38/255)},
+        'YELLOW': {'bg': (255/255, 242/255, 204/255), 'font': (127/255, 96/255, 0/255)},
+        'PURPLE': {'bg': (225/255, 213/255, 231/255), 'font': (96/255, 73/255, 122/255)}
+    }
+
+    try:
+        # Load Satellite_Watchlist sheet from Google Sheet
+        watchlist_ws = sh.worksheet('Satellite_Watchlist')
+        records = watchlist_ws.get_all_records()
+        if not records:
+            return
+            
+        watchlist_df = pd.DataFrame(records)
+    except Exception as e:
+        print(f"Note: Satellite_Watchlist sheet could not be loaded from Google Sheet: {e}")
+        return
+
+    try:
+        watchlist_df = watchlist_df.dropna(subset=['Stock', 'Color'])
+        watchlist_df['Stock'] = watchlist_df['Stock'].astype(str).str.strip()
+        watchlist_df['Color'] = watchlist_df['Color'].astype(str).str.strip().str.upper()
+        
+        # Sort chronologically by Date (newest first) to find the latest
+        watchlist_df['Date'] = pd.to_datetime(watchlist_df['Date'], dayfirst=True, errors='coerce')
+        watchlist_df = watchlist_df.sort_values(by='Date', ascending=False)
+        
+        # Deduplicate to keep only the latest color code per stock symbol
+        latest_colors = watchlist_df.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
+    except Exception as e:
+        print(f"Error parsing Google Sheets Satellite_Watchlist data: {e}")
+        return
+
+    col_map = {col_name: col_idx for col_idx, col_name in enumerate(df.columns, 1)}
+    if 'Symbol' not in col_map or 'TF_Classification' not in col_map:
+        return
+
+    symbol_idx = col_map['Symbol']
+    class_idx = col_map['TF_Classification']
+
+    formats = []
+    
+    # Loop over the dataframe rows
+    for i, row in df.iterrows():
+        row_num = i + 2 # Header is row 1
+        class_val = str(row.get('TF_Classification', '')).strip()
+        if class_val == 'Satellite':
+            symbol = str(row.get('Symbol', '')).strip()
+            if symbol in latest_colors:
+                color_name = latest_colors[symbol]
+                if color_name in GS_COLOR_MAP:
+                    bg = GS_COLOR_MAP[color_name]['bg']
+                    fg = GS_COLOR_MAP[color_name]['font']
+                    
+                    symbol_col_letter = gspread.utils.rowcol_to_a1(1, symbol_idx).rstrip('0123456789')
+                    cell_range = f'{symbol_col_letter}{row_num}'
+                    
+                    formats.append({
+                        "range": cell_range,
+                        "format": cellFormat(
+                            backgroundColor=color(bg[0], bg[1], bg[2]),
+                            textFormat=textFormat(bold=True, foregroundColor=color(fg[0], fg[1], fg[2]))
+                        )
+                    })
+                    
+    if formats:
+        try:
+            format_cell_ranges(current_portfolio_ws, [(f['range'], f['format']) for f in formats])
+        except Exception as e:
+            print(f"Error applying cell formats in Google Sheets: {e}")

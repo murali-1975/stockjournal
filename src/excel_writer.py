@@ -105,6 +105,9 @@ def save_workbook(
             # --- Apply conditional formatting based on LTP relationship ---
             _apply_ltp_comparison_formatting(writer, portfolio_df, 'Current_Portfolio')
 
+            # --- Apply custom color formatting for Satellite stocks based on Satellite_Watchlist ---
+            _apply_satellite_watchlist_formatting(writer, portfolio_df, output_file)
+
             # --- Auto-fit columns and freeze panes for readability ---
             for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
                 if sheet in writer.sheets:
@@ -278,4 +281,80 @@ def _apply_ltp_comparison_formatting(writer, df: pd.DataFrame, sheet_name: str) 
             
             worksheet.conditional_formatting.add(range_str, green_rule)
             worksheet.conditional_formatting.add(range_str, pink_rule)
+
+
+def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file: str) -> None:
+    """
+    Reads the Satellite_Watchlist sheet from the existing workbook and styles
+    the Symbol cell in the Current_Portfolio sheet for any matching 'Satellite'
+    stocks with their corresponding watchlist color.
+    Always uses the latest color entry if multiple exist for a stock.
+    """
+    import os
+    import pandas as pd
+    from openpyxl.styles import PatternFill, Font
+    
+    # Premium color palettes (light background fill, dark font text)
+    COLOR_MAP = {
+        'BLUE':   {'bg': 'DDEBF7', 'font': '1F4E78'},
+        'ORANGE': {'bg': 'FCE4D6', 'font': 'C65911'},
+        'GREEN':  {'bg': 'E2EFDA', 'font': '375623'},
+        'RED':    {'bg': 'FADBD8', 'font': 'A93226'},
+        'PINK':   {'bg': 'FADBD8', 'font': 'A93226'},
+        'YELLOW': {'bg': 'FFF2CC', 'font': '7F6000'},
+        'PURPLE': {'bg': 'E1D5E7', 'font': '60497A'}
+    }
+
+    if not os.path.exists(output_file):
+        return
+
+    try:
+        watchlist_df = pd.read_excel(output_file, sheet_name='Satellite_Watchlist')
+    except Exception as e:
+        print(f"Note: Satellite_Watchlist sheet could not be loaded from existing workbook: {e}")
+        return
+
+    try:
+        # Filter out empty entries and sanitize dates
+        watchlist_df = watchlist_df.dropna(subset=['Stock', 'Color'])
+        watchlist_df['Stock'] = watchlist_df['Stock'].astype(str).str.strip()
+        watchlist_df['Color'] = watchlist_df['Color'].astype(str).str.strip().str.upper()
+        
+        # Sort chronologically by Date (newest first) to find the latest
+        watchlist_df['Date'] = pd.to_datetime(watchlist_df['Date'], dayfirst=True, errors='coerce')
+        watchlist_df = watchlist_df.sort_values(by='Date', ascending=False)
+        
+        # Deduplicate to keep only the latest color code per stock symbol
+        latest_colors = watchlist_df.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
+    except Exception as e:
+        print(f"Error parsing Satellite_Watchlist data: {e}")
+        return
+
+    if 'Current_Portfolio' not in writer.sheets:
+        return
+        
+    worksheet = writer.sheets['Current_Portfolio']
+    col_map = {col_name: col_idx for col_idx, col_name in enumerate(df.columns, 1)}
+
+    if 'Symbol' not in col_map or 'TF_Classification' not in col_map:
+        return
+
+    symbol_idx = col_map['Symbol']
+    class_idx = col_map['TF_Classification']
+
+    # Apply styling row-by-row
+    for row in range(2, len(df) + 2):
+        class_val = str(worksheet.cell(row=row, column=class_idx).value).strip()
+        if class_val == 'Satellite':
+            symbol_cell = worksheet.cell(row=row, column=symbol_idx)
+            symbol = str(symbol_cell.value).strip()
+            
+            if symbol in latest_colors:
+                color_name = latest_colors[symbol]
+                if color_name in COLOR_MAP:
+                    bg_color = COLOR_MAP[color_name]['bg']
+                    font_color = COLOR_MAP[color_name]['font']
+                    
+                    symbol_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    symbol_cell.font = Font(color=font_color, bold=True)
 
