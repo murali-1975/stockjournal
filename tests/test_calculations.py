@@ -376,5 +376,26 @@ class TestLatestTrancheCheat(unittest.TestCase):
         self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), 'Tranch 1')
 
 
+class TestXIRRCalculations(unittest.TestCase):
+    """Test suite for the calculate_xirr solver and Return_Pct/XIRR in portfolios."""
+
+    def test_calculate_xirr_success(self):
+        """Should correctly calculate XIRR for standard cash flows."""
+        cfs = [
+            (pd.to_datetime('2020-01-01'), -1000.0),
+            (pd.to_datetime('2021-01-01'), 1100.0)
+        ]
+        from src.calculations import calculate_xirr
+        rate = calculate_xirr(cfs)
+        self.assertAlmostEqual(rate, 0.0997135, places=5)
+
+    def test_calculate_xirr_empty_or_same_sign(self):
+        """Should return 0.0 for empty or single-signed cash flows."""
+        from src.calculations import calculate_xirr
+        self.assertEqual(calculate_xirr([]), 0.0)
+        self.assertEqual(calculate_xirr([(pd.to_datetime('2020-01-01'), -1000.0)]), 0.0)
+        self.assertEqual(calculate_xirr([(pd.to_datetime('2020-01-01'), 1000.0)]), 0.0)
+
+
 if __name__ == '__main__':
     unittest.main()

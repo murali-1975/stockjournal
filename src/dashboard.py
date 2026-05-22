@@ -612,7 +612,7 @@ def _write_corporate_actions(ws, portfolio_df, overall_df, row):
 def _write_top_cheats_table(ws, df, row):
     """Writes Top 5 Cheat Stocks by holding period in descending order. Returns next free row."""
     row = _section_title(ws, row, 1, 'Top 5 Cheat Stocks by Holding Period')
-    row = _styled_header(ws, row, 1, ['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value'])
+    row = _styled_header(ws, row, 1, ['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value', 'Return %', 'XIRR'])
 
     if 'Latest_Tranche' not in df.columns or len(df) == 0:
         _data_cell(ws, row, 1, 'No cheat stocks found')
@@ -627,13 +627,24 @@ def _write_top_cheats_table(ws, df, row):
     # Sort by holding period desc and take top 5
     top_cheats = cheat_df.sort_values(by='Holding_Period', ascending=False).head(5)
 
-    col_keys = ['Symbol', 'Latest_Tranche', 'Holding_Period', 'Invested_Value', 'Current_Value']
-    formats = [None, None, '0', INR_FMT, INR_FMT]
+    col_keys = ['Symbol', 'Latest_Tranche', 'Holding_Period', 'Invested_Value', 'Current_Value', 'Return_Pct', 'XIRR']
+    formats = [None, None, '0', INR_FMT, INR_FMT, '0.00%', '0.00%']
 
     for _, s in top_cheats.iterrows():
         for ci, (key, fmt) in enumerate(zip(col_keys, formats), 1):
             val = s.get(key, '')
             font = LABEL_FONT if key == 'Symbol' else VALUE_FONT
+            
+            # Apply dynamic color formatting for Return_Pct and XIRR
+            if key in ['Return_Pct', 'XIRR']:
+                try:
+                    fval = float(val)
+                    if fval >= 0:
+                        font = GREEN_FONT
+                    else:
+                        font = RED_FONT
+                except Exception:
+                    pass
             _data_cell(ws, row, ci, val, fmt=fmt, font=font)
         row += 1
 

@@ -407,8 +407,8 @@ def _write_corporate_actions(grid, p_df, o_df, r, formats):
 def _write_top_cheats_table(grid, df, r, formats):
     _grid_write(grid, f'A{r}', [['Top 5 Cheat Stocks by Holding Period']])
     formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    _grid_write(grid, f'A{r+1}', [['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value']])
-    formats.append({"range": f'A{r+1}:E{r+1}', "format": _header_style()})
+    _grid_write(grid, f'A{r+1}', [['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value', 'Return %', 'XIRR']])
+    formats.append({"range": f'A{r+1}:G{r+1}', "format": _header_style()})
 
     if 'Latest_Tranche' not in df.columns or df.empty:
         return r + 2, formats
@@ -427,7 +427,9 @@ def _write_top_cheats_table(grid, df, r, formats):
             s.get('Latest_Tranche', ''),
             int(s.get('Holding_Period', 0)),
             float(s.get('Invested_Value', 0)),
-            float(s.get('Current_Value', 0))
+            float(s.get('Current_Value', 0)),
+            float(s.get('Return_Pct', 0.0)),
+            float(s.get('XIRR', 0.0))
         ])
 
     if rows:
@@ -435,9 +437,17 @@ def _write_top_cheats_table(grid, df, r, formats):
         _grid_write(grid, f'A{r+2}', rows)
         formats.append({"range": f'C{r+2}:C{end_r}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern='0'), horizontalAlignment='RIGHT')})
         formats.append({"range": f'D{r+2}:E{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
-        formats.append({"range": f'A{r+2}:E{end_r}', "format": cellFormat(borders=_thin_borders())})
+        formats.append({"range": f'F{r+2}:G{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
+        formats.append({"range": f'A{r+2}:G{end_r}', "format": cellFormat(borders=_thin_borders())})
         for i in range(len(rows)):
             formats.append({"range": f'A{r+2+i}', "format": cellFormat(textFormat=textFormat(bold=True))})
+            
+            # Apply dynamic color highlight (Green/Red) on Return_Pct and XIRR
+            ret_val = rows[i][5]
+            xirr_val = rows[i][6]
+            
+            formats.append({"range": f'F{r+2+i}', "format": cellFormat(textFormat=textFormat(foregroundColor=GREEN_FG if ret_val >= 0 else RED_FG))})
+            formats.append({"range": f'G{r+2+i}', "format": cellFormat(textFormat=textFormat(foregroundColor=GREEN_FG if xirr_val >= 0 else RED_FG))})
 
     return r + 2 + len(rows), formats
 

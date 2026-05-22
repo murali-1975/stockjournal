@@ -19,6 +19,7 @@ Contains the core mathematical and analytical logic for trade processing:
 """
 
 import re
+import math
 
 import numpy as np
 import pandas as pd
@@ -523,11 +524,56 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         0
     )
 
+    # --- Return Pct Calculation ---
+    portfolio_df['Return_Pct'] = np.where(
+        portfolio_df['Invested_Value'] > 0,
+        (portfolio_df['Unrealized_PnL'] / portfolio_df['Invested_Value']),
+        0.0
+    )
+
+    # --- XIRR Calculation per Symbol ---
+    xirr_values = []
+    today = pd.Timestamp.now().normalize()
+    for _, row in portfolio_df.iterrows():
+        sym = row['Symbol']
+        current_qty = row['Current_Quantity']
+        ltp = row['LTP']
+
+        sym_trades = df_copy[df_copy['Symbol'] == sym]
+        cash_flows = []
+        for date, group in sym_trades.groupby('Trade Date'):
+            net_flow = 0.0
+            for _, trade in group.iterrows():
+                flow_val = trade['Quantity'] * trade['Price']
+                t_type = str(trade['Trade Type']).lower()
+                if t_type == 'buy':
+                    net_flow -= flow_val
+                elif t_type == 'sell':
+                    net_flow += flow_val
+            cash_flows.append((date, net_flow))
+
+        if current_qty > 0:
+            terminal_val = current_qty * ltp
+            found = False
+            for i, (date, amt) in enumerate(cash_flows):
+                if date.normalize() == today:
+                    cash_flows[i] = (date, amt + terminal_val)
+                    found = True
+                    break
+            if not found:
+                cash_flows.append((today, terminal_val))
+
+        xirr_val = calculate_xirr(cash_flows)
+        xirr_values.append(xirr_val)
+
+    portfolio_df['XIRR'] = xirr_values
+
     # Reorder Current Portfolio columns
     port_cols = ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
                  'Current_Quantity', 'Average_Buy_Price', 'SL',
                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
                  'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
+                 'Return_Pct', 'XIRR',
                  'Holding_Period', 'Split_Info', 'Adj_Required']
     portfolio_df = portfolio_df[port_cols]
 
@@ -535,3 +581,91 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     overall_df = overall_df.drop(columns=['EMA9', 'EMA10', 'EMA11', 'EMA21', 'Prev_Day_Close', 'Prev_Week_Close'])
 
     return portfolio_df, overall_df
+
+
+def calculate_xirr(cash_flows: list[tuple[pd.Timestamp, float]]) -> float:
+    """
+    Calculates the Extended Internal Rate of Return (XIRR) for a series of cash flows.
+    cash_flows: list of tuples (date, amount)
+    Returns the rate as a float (e.g. 0.125 for 12.5%). Returns 0.0 if XIRR cannot be calculated.
+    """
+    # Filter out cash flows with 0 amount
+    flows = []
+    for d, amt in cash_flows:
+        if amt != 0:
+            d_naive = d.tz_localize(None) if hasattr(d, 'tz') and d.tz is not None else d
+            flows.append((d_naive, amt))
+            
+    if not flows:
+        return 0.0
+    
+    # Check if we have both positive and negative cash flows
+    has_pos = any(amt > 0 for _, amt in flows)
+    has_neg = any(amt < 0 for _, amt in flows)
+    if not (has_pos and has_neg):
+        return 0.0
+
+    # Sort flows by date
+    flows.sort(key=lambda x: x[0])
+    d0 = flows[0][0]
+
+    # NPV function
+    def npv(r):
+        val = 0.0
+        for d, amt in flows:
+            days = (d - d0).days
+            # Avoid complex numbers if (1+r) <= 0
+            if 1.0 + r <= 0:
+                val += amt * ((1.0 + r) ** (days / 365.0) if days >= 0 else 0)
+            else:
+                val += amt / ((1.0 + r) ** (days / 365.0))
+        return val
+
+    # NPV derivative function
+    def npv_deriv(r):
+        val = 0.0
+        for d, amt in flows:
+            days = (d - d0).days
+            if days == 0:
+                continue
+            if 1.0 + r <= 0:
+                continue
+            val += - (days / 365.0) * amt / ((1.0 + r) ** (days / 365.0 + 1.0))
+        return val
+
+    # Newton-Raphson solver
+    r = 0.1  # initial guess
+    for _ in range(100):
+        y = npv(r)
+        dy = npv_deriv(r)
+        if abs(dy) < 1e-12:
+            break
+        r_new = r - y / dy
+        # If r_new is crazy or produces negative (1+r), try to bisect or adjust step
+        if r_new <= -0.99 or math.isnan(r_new) or math.isinf(r_new):
+            r = r - 0.5 * y / dy if dy != 0 else r + 0.01
+            if r <= -0.99:
+                r = -0.9
+        else:
+            if abs(r_new - r) < 1e-6:
+                if abs(npv(r_new)) < 1e-4:
+                    return r_new
+            r = r_new
+
+    # Bisection fallback if Newton-Raphson failed
+    low, high = -0.99, 10.0
+    for _ in range(100):
+        mid = (low + high) / 2.0
+        y_mid = npv(mid)
+        if abs(y_mid) < 1e-4:
+            return mid
+        # we need to bracket the root. Let's check signs.
+        y_low = npv(low)
+        if y_mid * y_low < 0:
+            high = mid
+        else:
+            low = mid
+        if abs(high - low) < 1e-6:
+            return mid
+
+    return r
