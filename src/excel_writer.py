@@ -108,9 +108,13 @@ def save_workbook(
             # --- Apply custom color formatting for Satellite stocks based on Satellite_Watchlist ---
             _apply_satellite_watchlist_formatting(writer, portfolio_df, output_file)
 
+            # --- Update columns and dynamic conditional formatting for Satellite_Watchlist ---
+            _update_satellite_watchlist_columns(writer, output_file)
+            _apply_satellite_watchlist_conditional_formatting(writer)
+
             # --- Auto-fit columns and freeze panes for readability ---
-            for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
-                if sheet in writer.sheets:
+            for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio', 'Satellite_Watchlist']:
+                if sheet in writer.sheets or sheet in writer.book.sheetnames:
                     _auto_fit_columns_and_freeze(writer, sheet)
 
             # --- Create Dashboard with charts ---
@@ -358,3 +362,108 @@ def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file:
                     symbol_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
                     symbol_cell.font = Font(color=font_color, bold=True)
 
+
+def _update_satellite_watchlist_columns(writer, output_file) -> None:
+    """
+    Reads unique stocks from the Satellite_Watchlist sheet in writer.book,
+    downloads weekly data (Prev_Week_Close, EMA 9, EMA 11, EMA 21) from Yahoo Finance,
+    and populates Columns G, H, I, J in the Satellite_Watchlist sheet.
+    Preserves Columns D, E, F exactly.
+    """
+    from src.market_api import fetch_market_data_from_yahoo
+    
+    if 'Satellite_Watchlist' not in writer.book.sheetnames:
+        return
+
+    ws = writer.book['Satellite_Watchlist']
+    
+    # Ensure headers are set
+    ws.cell(row=1, column=7, value="Previous week Close")
+    ws.cell(row=1, column=8, value="EMA 9 (weekly)")
+    ws.cell(row=1, column=9, value="EMA 11 (weekly)")
+    ws.cell(row=1, column=10, value="EMA 21 (weekly)")
+    
+    # Read unique symbols from Column B (row 2 to max_row)
+    symbols = []
+    for r in range(2, ws.max_row + 1):
+        sym_val = ws.cell(row=r, column=2).value
+        if sym_val:
+            sym_str = str(sym_val).strip().upper()
+            if sym_str and sym_str not in symbols:
+                symbols.append(sym_str)
+                
+    if not symbols:
+        return
+        
+    # Map symbols to 'Satellite' classification so fetch_market_data_from_yahoo Resamples to weekly
+    classifications = {sym: 'Satellite' for sym in symbols}
+    
+    # Fetch market data
+    market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
+    
+    # Formatting for currency columns
+    inr_format = '[$₹-en-IN] #,##0.00'
+    
+    # Write values row-by-row
+    for r in range(2, ws.max_row + 1):
+        sym_val = ws.cell(row=r, column=2).value
+        if sym_val:
+            sym_str = str(sym_val).strip().upper()
+            if sym_str in market_data:
+                data = market_data[sym_str]
+                
+                # Column G: Previous week Close
+                cell_g = ws.cell(row=r, column=7, value=data.get('Prev_Week_Close', 0.0))
+                cell_g.number_format = inr_format
+                
+                # Column H: EMA 9 (weekly)
+                cell_h = ws.cell(row=r, column=8, value=data.get('EMA9', 0.0))
+                cell_h.number_format = inr_format
+                
+                # Column I: EMA 11 (weekly)
+                cell_i = ws.cell(row=r, column=9, value=data.get('EMA11', 0.0))
+                cell_i.number_format = inr_format
+                
+                # Column J: EMA 21 (weekly)
+                cell_j = ws.cell(row=r, column=10, value=data.get('EMA21', 0.0))
+                cell_j.number_format = inr_format
+
+
+def _apply_satellite_watchlist_conditional_formatting(writer) -> None:
+    """
+    Applies dynamic conditional formatting to the Satellite_Watchlist worksheet.
+    - If Price (Column E) > Previous Close (Column F) -> Column F becomes green.
+    - If Previous Close (Column F) > Previous week Close (Column G) -> Column G becomes green.
+    """
+    from openpyxl.styles import PatternFill, Font
+    from openpyxl.formatting.rule import FormulaRule
+    
+    if 'Satellite_Watchlist' not in writer.book.sheetnames:
+        return
+        
+    ws = writer.book['Satellite_Watchlist']
+    max_row = ws.max_row
+    if max_row < 2:
+        return
+        
+    green_fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
+    green_font = Font(color='375623', bold=True)
+    
+    # Clear old conditional formatting rules for the watchlist if any exist to avoid compounding
+    if hasattr(ws, 'conditional_formatting') and hasattr(ws.conditional_formatting, '_cf_rules'):
+        ws.conditional_formatting._cf_rules.clear()
+    
+    # Range for Column F: F2:F<max_row>
+    range_f = f"F2:F{max_row}"
+    # Range for Column G: G2:G<max_row>
+    range_g = f"G2:G{max_row}"
+    
+    # Formulas relative to row 2
+    formula_f = "=$E2>$F2"
+    formula_g = "=$F2>$G2"
+    
+    rule_f = FormulaRule(formula=[formula_f], fill=green_fill, font=green_font)
+    rule_g = FormulaRule(formula=[formula_g], fill=green_fill, font=green_font)
+    
+    ws.conditional_formatting.add(range_f, rule_f)
+    ws.conditional_formatting.add(range_g, rule_g)

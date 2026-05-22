@@ -91,6 +91,9 @@ def save_to_gsheet(data_frames, sheet_name_or_id, credentials_path="credentials.
         if tab_name == 'Current_Portfolio':
             _apply_gsheet_satellite_colors(sh, worksheet, clean_df)
 
+    # --- Update Satellite_Watchlist sheet if present in Google Sheet ---
+    _update_gsheet_satellite_watchlist(sh)
+
     print(f"Successfully exported to Google Sheets: {sh.url}")
 
 def _apply_sheet_styles(worksheet, df):
@@ -274,3 +277,162 @@ def _apply_gsheet_satellite_colors(sh, current_portfolio_ws, df):
             format_cell_ranges(current_portfolio_ws, [(f['range'], f['format']) for f in formats])
         except Exception as e:
             print(f"Error applying cell formats in Google Sheets: {e}")
+
+
+def _update_gsheet_satellite_watchlist(sh) -> None:
+    """
+    Updates the Google Sheet 'Satellite_Watchlist' tab with weekly market data (Columns G, H, I, J),
+    preserving Columns D, E, F formulas.
+    """
+    try:
+        watchlist_ws = sh.worksheet('Satellite_Watchlist')
+    except Exception:
+        # Sheet not found, skip gracefully
+        return
+
+    try:
+        values = watchlist_ws.get_all_values()
+        if not values or len(values) < 2:
+            return
+            
+        # Get unique symbols from Column B (index 1)
+        symbols = []
+        for row in values[1:]:
+            if len(row) > 1:
+                sym = str(row[1]).strip().upper()
+                if sym and sym not in symbols:
+                    symbols.append(sym)
+                    
+        if not symbols:
+            return
+
+        from src.market_api import fetch_market_data_from_yahoo
+        classifications = {sym: 'Satellite' for sym in symbols}
+        market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
+        
+        # Ensure header row has the headers for G, H, I, J
+        headers = values[0]
+        # Make sure the header row has at least 10 columns
+        while len(headers) < 10:
+            headers.append("")
+        headers[6] = "Previous week Close"
+        headers[7] = "EMA 9 (weekly)"
+        headers[8] = "EMA 11 (weekly)"
+        headers[9] = "EMA 21 (weekly)"
+        
+        # Update headers in Google Sheet
+        watchlist_ws.update('A1:J1', [headers])
+        
+        # Build 2D values list for G2:J
+        row_updates = []
+        for row in values[1:]:
+            sym = ""
+            if len(row) > 1:
+                sym = str(row[1]).strip().upper()
+            
+            if sym in market_data:
+                data = market_data[sym]
+                row_updates.append([
+                    data.get('Prev_Week_Close', 0.0),
+                    data.get('EMA9', 0.0),
+                    data.get('EMA11', 0.0),
+                    data.get('EMA21', 0.0)
+                ])
+            else:
+                row_updates.append(["", "", "", ""])
+                
+        # Bulk update G2:J
+        end_row = len(values)
+        range_str = f'G2:J{end_row}'
+        watchlist_ws.update(range_str, row_updates)
+        
+        # Format the numbers (Currency format) for Columns G, H, I, J
+        # In Google Sheets, format columns G, H, I, J as Currency with ₹ symbol
+        # and apply standard styling like thin borders and alignment.
+        from gspread_formatting import cellFormat, numberFormat, format_cell_ranges, borders, border, textFormat
+        import gspread
+        
+        col_formats = []
+        for col_idx in [7, 8, 9, 10]: # G, H, I, J
+            col_letter = gspread.utils.rowcol_to_a1(1, col_idx).rstrip('0123456789')
+            col_range = f'{col_letter}2:{col_letter}{end_row}'
+            col_formats.append({
+                "range": col_range,
+                "format": cellFormat(
+                    numberFormat=numberFormat(type='CURRENCY', pattern='₹#,##0.00'),
+                    horizontalAlignment='RIGHT'
+                )
+            })
+            
+        # Apply header styling to new columns (G1:J1)
+        header_range = f'G1:J1'
+        col_formats.append({
+            "range": header_range,
+            "format": cellFormat(
+                backgroundColor={"red": 47/255, "green": 84/255, "blue": 150/255},
+                textFormat=textFormat(bold=True, foregroundColor={"red": 1.0, "green": 1.0, "blue": 1.0}),
+                horizontalAlignment='CENTER'
+            )
+        })
+        
+        # Apply borders to the updated G1:J range
+        data_range = f'G1:J{end_row}'
+        col_formats.append({
+            "range": data_range,
+            "format": cellFormat(
+                borders=borders(top=border('SOLID'), bottom=border('SOLID'), left=border('SOLID'), right=border('SOLID'))
+            )
+        })
+        
+        format_cell_ranges(watchlist_ws, [(f['range'], f['format']) for f in col_formats])
+        
+        # Apply dynamic conditional formatting in Google Sheet
+        _apply_gsheet_watchlist_conditional_formatting(watchlist_ws, end_row)
+        
+    except Exception as e:
+        print(f"Error updating Google Sheets Satellite_Watchlist data: {e}")
+
+
+def _apply_gsheet_watchlist_conditional_formatting(ws, end_row) -> None:
+    """
+    Applies custom formula conditional formatting to Google Sheet 'Satellite_Watchlist' tab.
+    """
+    from gspread_formatting import get_conditional_format_rules, ConditionalFormatRule, BooleanRule, BooleanCondition, CellFormat, Color, textFormat, GridRange
+    
+    try:
+        rules = get_conditional_format_rules(ws)
+        rules.clear()
+        
+        # Format rules for Column F (Previous Close)
+        gr_f = GridRange.from_a1_range(f'F2:F{end_row}', ws)
+        rule_f = ConditionalFormatRule(
+            ranges=[gr_f],
+            booleanRule=BooleanRule(
+                condition=BooleanCondition(type='CUSTOM_FORMULA', values=['=$E2>$F2']),
+                format=CellFormat(
+                    backgroundColor=Color(226/255, 239/255, 218/255),
+                    textFormat=textFormat(bold=True, foregroundColor=Color(55/255, 86/255, 35/255))
+                )
+            )
+        )
+        
+        # Format rules for Column G (Previous week Close)
+        gr_g = GridRange.from_a1_range(f'G2:G{end_row}', ws)
+        rule_g = ConditionalFormatRule(
+            ranges=[gr_g],
+            booleanRule=BooleanRule(
+                condition=BooleanCondition(type='CUSTOM_FORMULA', values=['=$F2>$G2']),
+                format=CellFormat(
+                    backgroundColor=Color(226/255, 239/255, 218/255),
+                    textFormat=textFormat(bold=True, foregroundColor=Color(55/255, 86/255, 35/255))
+                )
+            )
+        )
+        
+        rules.append(rule_f)
+        rules.append(rule_g)
+        rules.save()
+        
+    except Exception as e:
+        print(f"Error applying Google Sheets watchlist conditional formatting: {e}")
+
