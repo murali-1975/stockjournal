@@ -310,11 +310,14 @@ def _update_gsheet_satellite_watchlist(sh) -> None:
         classifications = {sym: 'Satellite' for sym in symbols}
         market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
         
-        # Ensure header row has the headers for G, H, I, J
+        # Ensure header row has the headers for D, E, F, G, H, I, J
         headers = values[0]
         # Make sure the header row has at least 10 columns
         while len(headers) < 10:
             headers.append("")
+        headers[3] = "Company Name"
+        headers[4] = "Price"
+        headers[5] = "Previous Close "
         headers[6] = "Previous week Close"
         headers[7] = "EMA 9 (weekly)"
         headers[8] = "EMA 11 (weekly)"
@@ -323,7 +326,7 @@ def _update_gsheet_satellite_watchlist(sh) -> None:
         # Update headers in Google Sheet
         watchlist_ws.update('A1:J1', [headers])
         
-        # Build 2D values list for G2:J
+        # Build 2D values list for D2:J
         row_updates = []
         for row in values[1:]:
             sym = ""
@@ -332,28 +335,46 @@ def _update_gsheet_satellite_watchlist(sh) -> None:
             
             if sym in market_data:
                 data = market_data[sym]
+                
+                # Fetch Company Name (using Yahoo Finance long/short name if available)
+                comp_name = data.get('Company_Name', '')
+                if not comp_name:
+                    # Fallback to existing value if it is not an error string
+                    existing_name = row[3] if len(row) > 3 else ""
+                    if existing_name and not str(existing_name).startswith("#"):
+                        comp_name = existing_name
+                    else:
+                        comp_name = sym
+                
                 row_updates.append([
+                    comp_name,
+                    data.get('LTP', 0.0),
+                    data.get('Prev_Day_Close', 0.0),
                     data.get('Prev_Week_Close', 0.0),
                     data.get('EMA9', 0.0),
                     data.get('EMA11', 0.0),
                     data.get('EMA21', 0.0)
                 ])
             else:
-                row_updates.append(["", "", "", ""])
+                # If symbol not in market_data, preserve existing non-error values or leave empty
+                existing_d = row[3] if (len(row) > 3 and not str(row[3]).startswith("#")) else ""
+                existing_e = row[4] if (len(row) > 4 and not str(row[4]).startswith("#")) else ""
+                existing_f = row[5] if (len(row) > 5 and not str(row[5]).startswith("#")) else ""
+                row_updates.append([existing_d, existing_e, existing_f, "", "", "", ""])
                 
-        # Bulk update G2:J
+        # Bulk update D2:J
         end_row = len(values)
-        range_str = f'G2:J{end_row}'
+        range_str = f'D2:J{end_row}'
         watchlist_ws.update(range_str, row_updates)
         
-        # Format the numbers (Currency format) for Columns G, H, I, J
-        # In Google Sheets, format columns G, H, I, J as Currency with ₹ symbol
+        # Format the numbers (Currency format) for Columns E, F, G, H, I, J
+        # In Google Sheets, format columns E through J as Currency with ₹ symbol
         # and apply standard styling like thin borders and alignment.
         from gspread_formatting import cellFormat, numberFormat, format_cell_ranges, borders, border, textFormat
         import gspread
         
         col_formats = []
-        for col_idx in [7, 8, 9, 10]: # G, H, I, J
+        for col_idx in [5, 6, 7, 8, 9, 10]: # E, F, G, H, I, J (5 is E, 10 is J)
             col_letter = gspread.utils.rowcol_to_a1(1, col_idx).rstrip('0123456789')
             col_range = f'{col_letter}2:{col_letter}{end_row}'
             col_formats.append({
@@ -364,8 +385,8 @@ def _update_gsheet_satellite_watchlist(sh) -> None:
                 )
             })
             
-        # Apply header styling to new columns (G1:J1)
-        header_range = f'G1:J1'
+        # Apply header styling to new columns (D1:J1)
+        header_range = f'D1:J1'
         col_formats.append({
             "range": header_range,
             "format": cellFormat(
@@ -375,8 +396,8 @@ def _update_gsheet_satellite_watchlist(sh) -> None:
             )
         })
         
-        # Apply borders to the updated G1:J range
-        data_range = f'G1:J{end_row}'
+        # Apply borders to the updated D1:J range
+        data_range = f'D1:J{end_row}'
         col_formats.append({
             "range": data_range,
             "format": cellFormat(

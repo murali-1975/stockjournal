@@ -49,7 +49,7 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
     """
     import pandas as pd
 
-    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0}
+    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0, 'Company_Name': ''}
 
     try:
         import yfinance as yf
@@ -147,6 +147,7 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
                 ticker = yf.Ticker(ns_sym)
                 info = ticker.info
                 market_data[sym]['Market_Cap'] = info.get('marketCap', 0) or 0
+                market_data[sym]['Company_Name'] = info.get('longName') or info.get('shortName') or sym
 
                 # Fetch split/bonus history
                 splits = ticker.splits

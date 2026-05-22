@@ -52,6 +52,200 @@ def save_workbook(
         output_file:   Path to the output Excel file.
     """
     print(f"Saving transformed data to {output_file}...")
+    
+    # Determine if we should use the hybrid xlwings approach to preserve Excel STOCKS rich data types
+    use_xlwings = False
+    has_watchlist = False
+    if os.path.exists(output_file):
+        try:
+            import openpyxl as op
+            wb_test = op.load_workbook(output_file, read_only=True)
+            has_watchlist = 'Satellite_Watchlist' in wb_test.sheetnames
+            wb_test.close()
+        except Exception:
+            pass
+
+    if has_watchlist:
+        try:
+            import xlwings as xw
+            use_xlwings = True
+        except ImportError:
+            print("xlwings is not installed. Falling back to openpyxl (which converts Excel Stocks types to plain text).")
+
+    if use_xlwings:
+        print("Using xlwings hybrid approach to preserve STOCKS data types and live formulas...")
+        temp_file = "temp_transformed.xlsx"
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
+
+        try:
+            # 1. Generate updated sheets in a temporary workbook using openpyxl
+            with pd.ExcelWriter(temp_file, engine='openpyxl', mode='w') as writer:
+                df.to_excel(writer, sheet_name='Raw_Tradebook', index=False)
+                grouped_df.to_excel(writer, sheet_name='Transaction', index=False)
+                portfolio_df.to_excel(writer, sheet_name='Current_Portfolio', index=False)
+                overall_df.to_excel(writer, sheet_name='Overall_Portfolio', index=False)
+
+                # --- Format ID columns as flat integers ---
+                _format_id_columns(writer, df, 'Raw_Tradebook')
+
+                # --- Apply INR currency formatting ---
+                inr_format = '[$₹-en-IN] #,##0.00'
+
+                _apply_number_format(
+                    writer, grouped_df, 'Transaction',
+                    columns=['Average_Price', 'Total_Value'],
+                    number_format=inr_format
+                )
+
+                _apply_number_format(
+                    writer, portfolio_df, 'Current_Portfolio',
+                    columns=['Average_Buy_Price', 'SL', 'LTP_SL_Diff', 'Invested_Value', 'LTP',
+                             'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21',
+                             'Current_Value', 'Unrealized_PnL'],
+                    number_format=inr_format
+                )
+
+                _apply_number_format(
+                    writer, overall_df, 'Overall_Portfolio',
+                    columns=['Total_Buy_Value', 'Average_Buy_Price', 'Total_Sell_Value',
+                             'Average_Sell_Price', 'Invested_Value', 'LTP',
+                             'Current_Value', 'Realized_PnL', 'Unrealized_PnL', 'Total_PnL'],
+                    number_format=inr_format
+                )
+
+                _apply_number_format(
+                    writer, overall_df, 'Overall_Portfolio',
+                    columns=['Total_PnL_Percentage'],
+                    number_format='0.00%'
+                )
+
+                _apply_number_format(
+                    writer, portfolio_df, 'Current_Portfolio',
+                    columns=['LTP_SL_Diff_Pct'],
+                    number_format='0.00%'
+                )
+
+                # --- Apply conditional formatting based on LTP relationship ---
+                _apply_ltp_comparison_formatting(writer, portfolio_df, 'Current_Portfolio')
+
+                # --- Apply custom color formatting for Satellite stocks based on Satellite_Watchlist ---
+                # This reads color configurations from the original master file (which is intact)
+                _apply_satellite_watchlist_formatting(writer, portfolio_df, output_file)
+
+                # --- Auto-fit columns and freeze panes for readability ---
+                for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
+                    if sheet in writer.sheets:
+                        _auto_fit_columns_and_freeze(writer, sheet)
+
+                # --- Create Dashboard with charts ---
+                create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns)
+
+            # 2. Use xlwings to copy updated sheets and update watchlist columns in master workbook
+            import xlwings as xw
+            
+            # Start Excel in hidden mode (very clean and fast)
+            app = xw.App(visible=False)
+            app.display_alerts = False
+            
+            try:
+                # Open both workbooks
+                wb_master = app.books.open(os.path.abspath(output_file))
+                wb_temp = app.books.open(os.path.abspath(temp_file))
+                
+                # Copy sheet data for raw data/portfolios to preserve sheet order and formula references
+                for name in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
+                    if name in [s.name for s in wb_temp.sheets]:
+                        if name not in [s.name for s in wb_master.sheets]:
+                            wb_master.sheets.add(name)
+                        ws_temp = wb_temp.sheets[name]
+                        ws_master = wb_master.sheets[name]
+                        
+                        # Clear old contents and paste new cell values & formatting
+                        ws_master.clear()
+                        ws_temp.used_range.copy(ws_master.range('A1'))
+                
+                # Dashboard has floating charts, so we delete and re-copy the entire sheet object
+                if 'Dashboard' in [s.name for s in wb_temp.sheets]:
+                    if 'Dashboard' in [s.name for s in wb_master.sheets]:
+                        wb_master.sheets['Dashboard'].delete()
+                    wb_temp.sheets['Dashboard'].copy(before=wb_master.sheets[0])
+                
+                # 3. Update Satellite_Watchlist Columns G, H, I, J using xlwings
+                if 'Satellite_Watchlist' in [s.name for s in wb_master.sheets]:
+                    ws_watchlist = wb_master.sheets['Satellite_Watchlist']
+                    
+                    # Ensure headers are set
+                    ws_watchlist.range('G1').value = "Previous week Close"
+                    ws_watchlist.range('H1').value = "EMA 9 (weekly)"
+                    ws_watchlist.range('I1').value = "EMA 11 (weekly)"
+                    ws_watchlist.range('J1').value = "EMA 21 (weekly)"
+                    
+                    # Read unique symbols from Column B (B2 to B<last_row>)
+                    last_row = ws_watchlist.range('B' + str(ws_watchlist.cells.last_cell.row)).end('up').row
+                    if last_row >= 2:
+                        symbols = []
+                        for r in range(2, last_row + 1):
+                            sym_val = ws_watchlist.range((r, 2)).value
+                            if sym_val:
+                                sym_str = str(sym_val).strip().upper()
+                                if sym_str and sym_str not in symbols:
+                                    symbols.append(sym_str)
+                                    
+                        if symbols:
+                            from src.market_api import fetch_market_data_from_yahoo
+                            classifications = {sym: 'Satellite' for sym in symbols}
+                            market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
+                            
+                            for r in range(2, last_row + 1):
+                                sym_val = ws_watchlist.range((r, 2)).value
+                                if sym_val:
+                                    sym_str = str(sym_val).strip().upper()
+                                    if sym_str in market_data:
+                                        data = market_data[sym_str]
+                                        # Write Columns G, H, I, J
+                                        ws_watchlist.range((r, 7)).value = data.get('Prev_Week_Close', 0.0)
+                                        ws_watchlist.range((r, 8)).value = data.get('EMA9', 0.0)
+                                        ws_watchlist.range((r, 9)).value = data.get('EMA11', 0.0)
+                                        ws_watchlist.range((r, 10)).value = data.get('EMA21', 0.0)
+                                        
+                                        # Apply INR currency formatting (₹)
+                                        inr_excel_format = '[$₹-en-IN] #,##0.00'
+                                        ws_watchlist.range((r, 7)).number_format = inr_excel_format
+                                        ws_watchlist.range((r, 8)).number_format = inr_excel_format
+                                        ws_watchlist.range((r, 9)).number_format = inr_excel_format
+                                        ws_watchlist.range((r, 10)).number_format = inr_excel_format
+                                        
+                    # Auto-fit watchlist columns
+                    ws_watchlist.autofit()
+                
+                # Save and close the master workbook
+                wb_master.save()
+                wb_master.close()
+                wb_temp.close()
+                print("Workbook saved successfully via xlwings (STOCKS data types preserved)!")
+            finally:
+                app.quit()
+                
+            # Clean up the temporary file
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
+            return
+        except Exception as e:
+            print(f"Failed using xlwings hybrid approach: {e}. Falling back to standard openpyxl...")
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
+
+    # --- FALLBACK: Standard openpyxl Writer Block ---
     try:
         mode = 'a' if os.path.exists(output_file) else 'w'
         if_sheet_exists = 'replace' if mode == 'a' else None
