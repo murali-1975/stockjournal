@@ -81,7 +81,7 @@ class TestProcessGroupedTrades(unittest.TestCase):
         result = process_grouped_trades(df, config)
         labels = result.sort_values('Trade Date')['Tranches/Cheat'].tolist()
         self.assertEqual(labels[0], 'Cheat 1')
-        self.assertEqual(labels[1], 'Cheat 2')
+        self.assertEqual(labels[1], 'Tranch 1')
         self.assertEqual(labels[2], 'Tranch 2')
 
     def test_sell_labeled_na(self):
@@ -171,6 +171,30 @@ class TestStopLoss(unittest.TestCase):
         row = pd.Series({'Symbol': 'STOCK', 'Average_Buy_Price': 1000.0, 'EMA21': 950.0})
         sl = _get_stop_loss(row, grouped_df)
         self.assertEqual(sl, 900.0)
+
+    def test_sl_tranch_2_satellite(self):
+        """Satellite Tranch 2 SL should follow the risk-controlled exit formula."""
+        grouped_df = pd.DataFrame({
+            'Trade Date': ['2025-01-01', '2025-01-02'],
+            'Symbol': ['STOCK', 'STOCK'],
+            'Trade Type': ['buy', 'buy'],
+            'Total_Quantity': [1000.0, 500.0],
+            'Average_Price': [100.0, 130.0],
+            'Total_Value': [100000.0, 65000.0],
+            'Tranches/Cheat': ['Tranch 1', 'Tranch 2'],
+        })
+        
+        # Scenario A: Satellite stock
+        row_sat = pd.Series({'Symbol': 'STOCK', 'TF_Classification': 'Satellite', 'Average_Buy_Price': 110.0, 'EMA21': 95.0})
+        sl_sat = _get_stop_loss(row_sat, grouped_df)
+        # Expected: (0.90 * 100000 + 65000) / 1500 = 155000 / 1500 = 103.33
+        self.assertEqual(sl_sat, 103.33)
+        
+        # Scenario B: Core stock
+        row_core = pd.Series({'Symbol': 'STOCK', 'TF_Classification': 'Core', 'Average_Buy_Price': 110.0, 'EMA21': 95.0})
+        sl_core = _get_stop_loss(row_core, grouped_df)
+        # Expected: Tranch 1 average price = 100000 / 1000 = 100.0
+        self.assertEqual(sl_core, 100.0)
 
 
 class TestCalculatePortfolios(unittest.TestCase):
@@ -283,6 +307,42 @@ class TestCalculatePortfolios(unittest.TestCase):
         self.assertEqual(len(overall_df), 1)
         self.assertEqual(overall_df.iloc[0]['Current_Quantity'], 0)
 
+    @patch('src.calculations.fetch_market_data_from_yahoo')
+    def test_custom_price_updates_override(self, mock_yahoo):
+        """Custom price updates should override live prices, falling back to live prices if missing."""
+        mock_yahoo.return_value = {
+            'RELIANCE': {'LTP': 2600.0, 'EMA9': 2590.0, 'EMA10': 2585.0, 'EMA11': 2580.0, 'EMA21': 2550.0, 'Market_Cap': 1_800_000_000_000},
+            'TCS': {'LTP': 3500.0, 'EMA9': 3490.0, 'EMA10': 3485.0, 'EMA11': 3480.0, 'EMA21': 3450.0, 'Market_Cap': 500_000_000_000}
+        }
+        df = pd.DataFrame({
+            'Trade Date': ['2025-01-01', '2025-01-01'],
+            'Symbol': ['RELIANCE', 'TCS'],
+            'Trade Type': ['buy', 'buy'],
+            'Quantity': [10, 10],
+            'Price': [2500.0, 3400.0],
+        })
+        grouped_df = pd.DataFrame({
+            'Trade Date': ['2025-01-01', '2025-01-01'],
+            'Symbol': ['RELIANCE', 'TCS'],
+            'Trade Type': ['buy', 'buy'],
+            'Total_Quantity': [10, 10],
+            'Average_Price': [2500.0, 3400.0],
+            'Total_Value': [25000.0, 34000.0],
+            'Tranches/Cheat': ['Tranch 1', 'Tranch 1'],
+        })
+
+        price_updates = {'RELIANCE': 2750.50} # Overridden price. TCS is missing (should fallback to 3500.0)
+
+        portfolio_df, overall_df = calculate_portfolios(df, grouped_df, price_updates=price_updates)
+
+        # Check RELIANCE has overridden price
+        reliance_row = portfolio_df[portfolio_df['Symbol'] == 'RELIANCE'].iloc[0]
+        self.assertEqual(reliance_row['LTP'], 2750.50)
+
+        # Check TCS fallback to Yahoo Finance LTP
+        tcs_row = portfolio_df[portfolio_df['Symbol'] == 'TCS'].iloc[0]
+        self.assertEqual(tcs_row['LTP'], 3500.0)
+
 
 class TestClassifyMarketCap(unittest.TestCase):
     """Test suite for the _classify_market_cap function."""
@@ -371,6 +431,7 @@ class TestLatestTrancheCheat(unittest.TestCase):
         gdf = pd.DataFrame({
             'Symbol': ['STOCK'] * 2,
             'Trade Type': ['buy', 'sell'],
+            'Total_Quantity': [100, 50],
             'Tranches/Cheat': ['Tranch 1', 'N/A']
         })
         self.assertEqual(_get_latest_tranche_cheat('STOCK', gdf), 'Tranch 1')

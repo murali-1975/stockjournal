@@ -57,8 +57,18 @@ class TestDashboard(unittest.TestCase):
 
     def test_create_dashboard(self):
         """Dashboard should render without exceptions and create the required sheet."""
-        # Execute the main function
-        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        
+        # Add a mock watchlist dataframe
+        watchlist_df = pd.DataFrame({
+            'Stock': ['INFY', 'TCS', 'NEWSTOCK'],
+            'Color': ['BLUE', 'GREEN', 'RED'],
+            'Date': ['01-05-2026', '02-05-2026', '03-05-2026'],
+            'Price': [1700.0, 3300.0, 500.0],
+            'Previous week Close': [1600.0, 3200.0, 450.0]
+        })
+        
+        # Execute the main function with the watchlist
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df, watchlist_df=watchlist_df)
         
         # Verify the sheet was created
         self.assertIn('Dashboard', self.wb.sheetnames)
@@ -77,7 +87,7 @@ class TestDashboard(unittest.TestCase):
 
     def test_create_dashboard_empty_data(self):
         """Dashboard should gracefully handle empty DataFrames."""
-        # Execute with empty data
+        # Execute with empty data (and None for watchlist_df)
         create_dashboard(self.wb, pd.DataFrame(), pd.DataFrame())
         
         self.assertIn('Dashboard', self.wb.sheetnames)

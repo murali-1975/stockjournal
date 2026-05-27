@@ -12,7 +12,7 @@ import unittest
 
 import pandas as pd
 
-from src.data_io import load_data, merge_and_deduplicate
+from src.data_io import load_data, merge_and_deduplicate, load_price_updates
 
 
 def _create_test_excel(data: dict, path: str) -> str:
@@ -128,6 +128,50 @@ class TestMergeAndDeduplicate(unittest.TestCase):
         })
         result = merge_and_deduplicate(master, new)
         self.assertEqual(len(result), 3)  # 2 original + 1 new unique
+
+
+class TestLoadPriceUpdates(unittest.TestCase):
+    """Test suite for the load_price_updates function."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def test_missing_sheet_or_file(self):
+        """Should return an empty dict if the file or sheet is missing."""
+        res = load_price_updates('/nonexistent/file.xlsx')
+        self.assertEqual(res, {})
+
+    def test_valid_price_updates_different_col_positions(self):
+        """Should successfully parse prices even if Symbol and LTP columns are rearranged."""
+        path = os.path.join(self.tmp_dir, 'prices.xlsx')
+        
+        # Test case 1: [LTP, Unrelated, Symbol]
+        data1 = {
+            'LTP': [2500.50, 3500.00],
+            'Unrelated': ['A', 'B'],
+            'Symbol': ['RELIANCE', 'tcs'] # Should handle case-insensitivity in Symbol value
+        }
+        # Write custom sheet using pandas excel writer
+        with pd.ExcelWriter(path) as writer:
+            pd.DataFrame(data1).to_excel(writer, sheet_name='Price_Update', index=False)
+            
+        res = load_price_updates(path)
+        self.assertEqual(res, {'RELIANCE': 2500.50, 'TCS': 3500.00})
+
+    def test_valid_price_updates_alternate_headers(self):
+        """Should recognize alternative column names like 'Stock Symbol' or 'Last Traded Price'."""
+        path = os.path.join(self.tmp_dir, 'alt_prices.xlsx')
+        data = {
+            'Stock Symbol': ['INFY', 'WIPRO'],
+            'Last Traded Price': [1600.0, 'invalid_price'], # Should skip invalid prices
+            'LTP': [1600.0, 500.0] # 'Last Traded Price' header matches first
+        }
+        with pd.ExcelWriter(path) as writer:
+            pd.DataFrame(data).to_excel(writer, sheet_name='Price_Update', index=False)
+            
+        res = load_price_updates(path)
+        # INFY gets float, WIPRO skipped due to string 'invalid_price'
+        self.assertEqual(res, {'INFY': 1600.0})
 
 
 if __name__ == '__main__':

@@ -21,6 +21,15 @@ A powerful Python-based trading journal and portfolio management system designed
 
 ---
 
+## Recent Updates
+
+### 2026-05-27
+- **Dynamic Color Styling:** Added consistent, unified color coding across all local Excel and Google Sheets dashboard tables (Gainers/Losers, Nearest Stop Loss, Top Cheats, Corporate Actions, and Movers). Colors are automatically extracted from the `Satellite_Watchlist`.
+- **Top 10 Movers Tables:** Deployed two new dashboard tables: "Top 10 Movers (Current Portfolio)" and "Top 10 Movers (Watchlist Only)" which track percentage changes in price compared to the previous week's close.
+- **Improved Data Loading Pipeline:** Bypassed `xlwings` lock constraints by loading external Watchlist data directly from the master workbook via Pandas to populate the dashboard before exporting.
+
+---
+
 ## File Structure
 
 ```text

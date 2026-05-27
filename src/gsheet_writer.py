@@ -271,6 +271,16 @@ def _apply_gsheet_satellite_colors(sh, current_portfolio_ws, df):
                             textFormat=textFormat(bold=True, foregroundColor=color(fg[0], fg[1], fg[2]))
                         )
                     })
+            else:
+                # Stock not in Satellite_Watchlist: Highlight in Dark Red
+                symbol_col_letter = gspread.utils.rowcol_to_a1(1, symbol_idx).rstrip('0123456789')
+                cell_range = f'{symbol_col_letter}{row_num}'
+                formats.append({
+                    "range": cell_range,
+                    "format": cellFormat(
+                        textFormat=textFormat(bold=True, foregroundColor=color(0.545, 0.0, 0.0))
+                    )
+                })
                     
     if formats:
         try:

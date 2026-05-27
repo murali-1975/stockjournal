@@ -167,3 +167,65 @@ def load_equity_master(config: dict) -> pd.DataFrame | None:
     except Exception as e:
         print(f"Error loading Equity Master: {e}")
         return None
+
+
+def load_price_updates(output_file: str) -> dict:
+    """
+    Loads custom price updates from the 'Price_Update' sheet of the master workbook.
+    Looks for the 'Symbol' (or Stock Symbol) column and the 'LTP' column, regardless of their position.
+    Scans the first 10 rows to find the actual header row.
+    """
+    import os
+    if not os.path.exists(output_file):
+        return {}
+    try:
+        # Load without headers first to find the header row
+        df_raw = pd.read_excel(output_file, sheet_name='Price_Update', header=None)
+        
+        header_row_idx = -1
+        for idx, row in df_raw.head(10).iterrows():
+            row_vals = [str(val).strip().upper() for val in row.values]
+            if any(h in row_vals for h in ['SYMBOL', 'STOCK SYMBOL', 'STOCK_SYMBOL']):
+                header_row_idx = idx
+                break
+                
+        if header_row_idx == -1:
+            print("Warning: 'Price_Update' sheet is missing 'Symbol' column. Skipping local price updates.")
+            return {}
+            
+        # Reload with the correct header
+        df = pd.read_excel(output_file, sheet_name='Price_Update', header=header_row_idx)
+        df.columns = df.columns.astype(str).str.strip()
+        
+        # Find column matching Symbol
+        symbol_col = None
+        for col in df.columns:
+            if col.upper() in ['SYMBOL', 'STOCK SYMBOL', 'STOCK_SYMBOL']:
+                symbol_col = col
+                break
+        
+        # Find column matching LTP
+        ltp_col = None
+        for col in df.columns:
+            if col.upper() in ['LTP', 'LAST TRADED PRICE', 'LAST_TRADED_PRICE', 'PRICE']:
+                ltp_col = col
+                break
+                
+        if not symbol_col or not ltp_col:
+            print("Warning: 'Price_Update' sheet is missing 'LTP' column. Skipping local price updates.")
+            return {}
+            
+        # Build dictionary
+        price_dict = {}
+        for _, row in df.iterrows():
+            sym = str(row[symbol_col]).strip().upper()
+            val = row[ltp_col]
+            try:
+                price_dict[sym] = float(val)
+            except (ValueError, TypeError):
+                pass # Skip invalid prices
+        print(f"Loaded {len(price_dict)} price updates from 'Price_Update' sheet.")
+        return price_dict
+    except Exception:
+        # Sheet not found or error loading, return empty dict silently
+        return {}

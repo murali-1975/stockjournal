@@ -134,6 +134,7 @@ def process_grouped_trades(df: pd.DataFrame, config: dict = None) -> pd.DataFram
                     # Add to accumulated cheat value
                     symbol_state[symbol]['accumulated_cheat_value'] += total_value
 
+                    is_promoted = False
                     if tranch_size > 0:
                         approx_tranches = round(symbol_state[symbol]['accumulated_cheat_value'] / tranch_size)
                         if approx_tranches > 0:
@@ -143,8 +144,13 @@ def process_grouped_trades(df: pd.DataFrame, config: dict = None) -> pd.DataFram
                                 symbol_state[symbol]['accumulated_cheat_value'] -= expected_val
                                 if symbol_state[symbol]['accumulated_cheat_value'] < 0:
                                     symbol_state[symbol]['accumulated_cheat_value'] = 0
+                                symbol_state[symbol]['cheat_count'] = 0
+                                is_promoted = True
 
-                    labels.append(f"Cheat {symbol_state[symbol]['cheat_count']}")
+                    if is_promoted:
+                        labels.append(f"Tranch {symbol_state[symbol]['tranch_count']}")
+                    else:
+                        labels.append(f"Cheat {symbol_state[symbol]['cheat_count']}")
                 else:
                     # Not a cheat → must be a tranche by default
                     mult = max(1, round(total_value / tranch_size) if tranch_size > 0 else 1)
@@ -201,10 +207,24 @@ def _get_stop_loss(row: pd.Series, grouped_df: pd.DataFrame) -> float:
     if max_tranch == 1:
         return round(avg_buy * 0.9, 2)
     elif max_tranch == 2:
-        t1_buys = buys[buys['Tranches/Cheat'] == 'Tranch 1']
-        if not t1_buys.empty:
-            return round((t1_buys['Total_Value'].sum() / t1_buys['Total_Quantity'].sum()), 2)
-        return round(avg_buy * 0.9, 2)
+        is_satellite = (row.get('TF_Classification') == 'Satellite')
+        if is_satellite:
+            t1_buys = buys[buys['Tranches/Cheat'] == 'Tranch 1']
+            t2_buys = buys[buys['Tranches/Cheat'] == 'Tranch 2']
+            t1_val = t1_buys['Total_Value'].sum() if not t1_buys.empty else 0.0
+            t2_val = t2_buys['Total_Value'].sum() if not t2_buys.empty else 0.0
+            t1_qty = t1_buys['Total_Quantity'].sum() if not t1_buys.empty else 0.0
+            t2_qty = t2_buys['Total_Quantity'].sum() if not t2_buys.empty else 0.0
+            total_qty = t1_qty + t2_qty
+            if total_qty > 0:
+                # Custom risk SL: (0.90 * T1_Value + T2_Value) / (T1_Qty + T2_Qty)
+                return round((0.90 * t1_val + t2_val) / total_qty, 2)
+            return round(avg_buy * 0.9, 2)
+        else:
+            t1_buys = buys[buys['Tranches/Cheat'] == 'Tranch 1']
+            if not t1_buys.empty:
+                return round((t1_buys['Total_Value'].sum() / t1_buys['Total_Quantity'].sum()), 2)
+            return round(avg_buy * 0.9, 2)
     elif max_tranch == 3:
         t123_buys = buys[buys['Tranches/Cheat'].isin(['Tranch 1', 'Tranch 2', 'Tranch 3'])]
         if not t123_buys.empty:
@@ -307,52 +327,58 @@ def _get_split_info(symbol: str, first_buy_date, market_data: dict, applied_spli
 
 def _get_latest_tranche_cheat(symbol: str, grouped_df: pd.DataFrame) -> str:
     """
-    Returns the latest (highest-numbered) Tranche or Cheat label for a symbol.
-
-    Scans the grouped transaction DataFrame for all buy rows matching the
-    given symbol and finds the label with the highest number. If a symbol
-    has both Tranche and Cheat entries, the one with the higher number is
-    returned. If numbers are equal, Tranche takes priority.
-
-    Args:
-        symbol:     The stock ticker symbol to look up.
-        grouped_df: The grouped transaction DataFrame with 'Tranches/Cheat' column.
-
-    Returns:
-        The latest label string (e.g., 'Tranch 3', 'Cheat 2'), or '' if none found.
+    Returns the latest Tranche or Cheat label for a symbol.
+    Gives precedence to 'Tranch' over 'Cheat' for the current active holding.
+    Resets tracking if the position was fully sold.
     """
     import re
 
     if 'Tranches/Cheat' not in grouped_df.columns:
         return ''
 
-    sym_buys = grouped_df[
-        (grouped_df['Symbol'] == symbol) &
-        (grouped_df['Trade Type'].str.lower() == 'buy')
-    ]
-
-    if sym_buys.empty:
+    sym_trades = grouped_df[grouped_df['Symbol'] == symbol].copy()
+    if sym_trades.empty:
         return ''
 
-    max_label = ''
-    max_num = 0
+    max_tranch = 0
+    max_cheat = 0
+    current_qty = 0.0
 
-    for label in sym_buys['Tranches/Cheat']:
-        if label == 'N/A' or pd.isna(label):
-            continue
-        match = re.match(r'(Tranch|Cheat)\s+(\d+)', str(label))
-        if match:
-            num = int(match.group(2))
-            label_type = match.group(1)
-            # Higher number wins; if equal, Tranch > Cheat
-            if num > max_num or (num == max_num and label_type == 'Tranch'):
-                max_num = num
-                max_label = label
+    for _, row in sym_trades.iterrows():
+        trade_type = str(row['Trade Type']).lower()
+        qty = float(row.get('Total_Quantity', 0))
+        label = str(row.get('Tranches/Cheat', ''))
 
-    return max_label
+        if trade_type == 'buy':
+            if current_qty <= 1e-5:
+                max_tranch = 0
+                max_cheat = 0
+            current_qty += qty
+            
+            match = re.match(r'(Tranch|Cheat)\s+(\d+)', label)
+            if match:
+                ltype = match.group(1)
+                num = int(match.group(2))
+                if ltype == 'Tranch':
+                    max_tranch = max(max_tranch, num)
+                else:
+                    max_cheat = max(max_cheat, num)
+                    
+        elif trade_type == 'sell':
+            current_qty -= qty
+            if current_qty <= 1e-5:
+                max_tranch = 0
+                max_cheat = 0
+                current_qty = 0.0
+
+    if max_tranch > 0:
+        return f"Tranch {max_tranch}"
+    elif max_cheat > 0:
+        return f"Cheat {max_cheat}"
+    return ''
 
 
-def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dict = None) -> tuple:
+def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dict = None, price_updates: dict = None) -> tuple:
     """
     Calculates current holdings, overall trade summary, and PnL statistics.
 
@@ -369,9 +395,10 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
            in Current Portfolio).
 
     Args:
-        df:         The raw (or merged) trade DataFrame.
-        grouped_df: The grouped transaction DataFrame with Tranche labels.
-        config:     Configuration dict with cap classification thresholds.
+        df:            The raw (or merged) trade DataFrame.
+        grouped_df:    The grouped transaction DataFrame with Tranche labels.
+        config:        Configuration dict with cap classification thresholds.
+        price_updates: Dict mapping Symbol -> LTP overrides from 'Price_Update' sheet.
 
     Returns:
         A tuple of (current_portfolio_df, overall_portfolio_df).
@@ -422,7 +449,14 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     symbols = overall_df['Symbol'].tolist()
     market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
 
-    overall_df['LTP'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('LTP', 0.0))
+    def get_ltp(sym):
+        if price_updates and sym in price_updates:
+            val = price_updates[sym]
+            if pd.notna(val) and val > 0:
+                return round(float(val), 2)
+        return market_data.get(sym, {}).get('LTP', 0.0)
+
+    overall_df['LTP'] = overall_df['Symbol'].apply(get_ltp)
     overall_df['Prev_Day_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prev_Day_Close', 0.0))
     overall_df['Prev_Week_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prev_Week_Close', 0.0))
     overall_df['EMA9'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA9', 0.0))

@@ -128,7 +128,9 @@ def main(update_only: bool = False, gsheet_target: str = None):
     grouped_df = process_grouped_trades(df, config)
 
     # Step 6: Calculate portfolios, PnL, and Stop Loss
-    portfolio_df, overall_df = calculate_portfolios(df, grouped_df, config)
+    from src.data_io import load_price_updates
+    price_updates = load_price_updates(output_path)
+    portfolio_df, overall_df = calculate_portfolios(df, grouped_df, config, price_updates)
 
     # Step 6.5: Fetch Benchmark Returns
     start_date_str = config.get('INVEST_START_DATE', '')

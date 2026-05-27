@@ -24,6 +24,97 @@ import pandas as pd
 from .dashboard import create_dashboard
 
 
+def _find_price_update_columns_from_file(output_file: str) -> tuple:
+    """
+    Locates the Symbol and LTP columns in the existing Price_Update sheet.
+    Returns (symbol_col_letter, ltp_col_letter) or (None, None) if not found.
+    """
+    import os
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    if not os.path.exists(output_file):
+        return None, None
+    try:
+        wb = load_workbook(output_file, read_only=True)
+        if 'Price_Update' not in wb.sheetnames:
+            wb.close()
+            return None, None
+        ws = wb['Price_Update']
+        symbol_col_letter = None
+        ltp_col_letter = None
+        
+        # Check the first 10 rows and 100 columns
+        for row_idx in range(1, 11):
+            row_vals = []
+            for col_idx in range(1, 100):
+                cell_val = ws.cell(row=row_idx, column=col_idx).value
+                if cell_val is not None:
+                    header = str(cell_val).strip().upper()
+                    if header in ['SYMBOL', 'STOCK SYMBOL', 'STOCK_SYMBOL']:
+                        symbol_col_letter = get_column_letter(col_idx)
+                    elif header in ['LTP', 'LAST TRADED PRICE', 'LAST_TRADED_PRICE', 'PRICE']:
+                        ltp_col_letter = get_column_letter(col_idx)
+            if symbol_col_letter and ltp_col_letter:
+                break
+                
+        wb.close()
+        return symbol_col_letter, ltp_col_letter
+    except Exception:
+        return None, None
+
+def _convert_portfolios_to_formulas(portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, output_file: str) -> tuple:
+    """
+    Converts LTP and its dependent calculations to standard Excel formulas.
+    Returns (portfolio_write_df, overall_write_df).
+    """
+    sym_col_let, ltp_col_let = _find_price_update_columns_from_file(output_file)
+    sym_col_let = sym_col_let or 'A'
+    ltp_col_let = ltp_col_let or 'F'
+    
+    port_f = portfolio_df.copy()
+    over_f = overall_df.copy()
+    
+    # 1. Update Current_Portfolio
+    if len(port_f) > 0:
+        # Convert columns to object type to support string formulas
+        for col in ['LTP', 'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Current_Value', 'Unrealized_PnL', 'Return_Pct']:
+            if col in port_f.columns:
+                port_f[col] = port_f[col].astype(object)
+                
+        for idx, (p_idx, row) in enumerate(portfolio_df.iterrows()):
+            r = idx + 2 # row number in Excel (1-based, plus 1 header row)
+            fallback_ltp = row['LTP']
+            if pd.isna(fallback_ltp):
+                fallback_ltp = 0.0
+                
+            port_f.at[p_idx, 'LTP'] = f"=IFERROR(INDEX(Price_Update!${ltp_col_let}:${ltp_col_let}, MATCH(A{r}, Price_Update!${sym_col_let}:${sym_col_let}, 0)), {fallback_ltp})"
+            port_f.at[p_idx, 'LTP_SL_Diff'] = f"=L{r}-H{r}"
+            port_f.at[p_idx, 'LTP_SL_Diff_Pct'] = f"=IF(L{r}>0, (L{r}-H{r})/L{r}, 0)"
+            port_f.at[p_idx, 'Current_Value'] = f"=F{r}*L{r}"
+            port_f.at[p_idx, 'Unrealized_PnL'] = f"=S{r}-K{r}"
+            port_f.at[p_idx, 'Return_Pct'] = f"=IF(K{r}>0, T{r}/K{r}, 0)"
+            
+    # 2. Update Overall_Portfolio
+    if len(over_f) > 0:
+        for col in ['LTP', 'Current_Value', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage']:
+            if col in over_f.columns:
+                over_f[col] = over_f[col].astype(object)
+                
+        for idx, (o_idx, row) in enumerate(overall_df.iterrows()):
+            r = idx + 2 # row number in Excel
+            fallback_ltp = row['LTP']
+            if pd.isna(fallback_ltp):
+                fallback_ltp = 0.0
+                
+            over_f.at[o_idx, 'LTP'] = f"=IFERROR(INDEX(Price_Update!${ltp_col_let}:${ltp_col_let}, MATCH(A{r}, Price_Update!${sym_col_let}:${sym_col_let}, 0)), {fallback_ltp})"
+            over_f.at[o_idx, 'Current_Value'] = f"=L{r}*N{r}"
+            over_f.at[o_idx, 'Unrealized_PnL'] = f"=O{r}-M{r}"
+            over_f.at[o_idx, 'Total_PnL'] = f"=P{r}+Q{r}"
+            over_f.at[o_idx, 'Total_PnL_Percentage'] = f"=IF(G{r}>0, R{r}/G{r}, 0)"
+            
+    return port_f, over_f
+
+
 def save_workbook(
     df: pd.DataFrame,
     grouped_df: pd.DataFrame,
@@ -52,6 +143,9 @@ def save_workbook(
         output_file:   Path to the output Excel file.
     """
     print(f"Saving transformed data to {output_file}...")
+    
+    # Convert portfolios to dynamic Excel formulas for writing
+    portfolio_write_df, overall_write_df = _convert_portfolios_to_formulas(portfolio_df, overall_df, output_file)
     
     # Determine if we should use the hybrid xlwings approach to preserve Excel STOCKS rich data types
     use_xlwings = False
@@ -86,8 +180,11 @@ def save_workbook(
             with pd.ExcelWriter(temp_file, engine='openpyxl', mode='w') as writer:
                 df.to_excel(writer, sheet_name='Raw_Tradebook', index=False)
                 grouped_df.to_excel(writer, sheet_name='Transaction', index=False)
-                portfolio_df.to_excel(writer, sheet_name='Current_Portfolio', index=False)
-                overall_df.to_excel(writer, sheet_name='Overall_Portfolio', index=False)
+                portfolio_write_df.to_excel(writer, sheet_name='Current_Portfolio', index=False)
+                overall_write_df.to_excel(writer, sheet_name='Overall_Portfolio', index=False)
+
+                # Create a dummy Price_Update sheet so local formulas don't break during copy
+                writer.book.create_sheet('Price_Update')
 
                 # --- Format ID columns as flat integers ---
                 _format_id_columns(writer, df, 'Raw_Tradebook')
@@ -142,7 +239,13 @@ def save_workbook(
                         _auto_fit_columns_and_freeze(writer, sheet)
 
                 # --- Create Dashboard with charts ---
-                create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns)
+                watchlist_df = None
+                if has_watchlist:
+                    try:
+                        watchlist_df = pd.read_excel(output_file, sheet_name='Satellite_Watchlist')
+                    except Exception:
+                        pass
+                create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns, watchlist_df)
 
             # 2. Use xlwings to copy updated sheets and update watchlist columns in master workbook
             import xlwings as xw
@@ -169,10 +272,19 @@ def save_workbook(
                         ws_temp.used_range.copy(ws_master.range('A1'))
                 
                 # Dashboard has floating charts, so we delete and re-copy the entire sheet object
+                if 'Dashboard' in [s.name for s in wb_master.sheets]:
+                    wb_master.sheets['Dashboard'].delete()
                 if 'Dashboard' in [s.name for s in wb_temp.sheets]:
-                    if 'Dashboard' in [s.name for s in wb_master.sheets]:
-                        wb_master.sheets['Dashboard'].delete()
                     wb_temp.sheets['Dashboard'].copy(before=wb_master.sheets[0])
+                    wb_master.sheets['Dashboard'].name = 'Dashboard'
+                    
+                # Clean up corrupted external links caused by cross-workbook sheet copying
+                for ws in wb_master.sheets:
+                    try:
+                        # Find and replace all instances of the temporary workbook name in formulas
+                        ws.api.Cells.Replace(What="[temp_transformed.xlsx]", Replacement="", LookAt=2)
+                    except Exception:
+                        pass
                 
                 # 3. Update Satellite_Watchlist Columns G, H, I, J using xlwings
                 if 'Satellite_Watchlist' in [s.name for s in wb_master.sheets]:
@@ -253,8 +365,8 @@ def save_workbook(
         with pd.ExcelWriter(output_file, engine='openpyxl', mode=mode, if_sheet_exists=if_sheet_exists) as writer:
             df.to_excel(writer, sheet_name='Raw_Tradebook', index=False)
             grouped_df.to_excel(writer, sheet_name='Transaction', index=False)
-            portfolio_df.to_excel(writer, sheet_name='Current_Portfolio', index=False)
-            overall_df.to_excel(writer, sheet_name='Overall_Portfolio', index=False)
+            portfolio_write_df.to_excel(writer, sheet_name='Current_Portfolio', index=False)
+            overall_write_df.to_excel(writer, sheet_name='Overall_Portfolio', index=False)
 
             # --- Format ID columns as flat integers (no scientific notation) ---
             _format_id_columns(writer, df, 'Raw_Tradebook')
@@ -555,6 +667,9 @@ def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file:
                     
                     symbol_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
                     symbol_cell.font = Font(color=font_color, bold=True)
+            else:
+                # Stock not in Satellite_Watchlist: Highlight in Dark Red
+                symbol_cell.font = Font(color='8B0000', bold=True)
 
 
 def _update_satellite_watchlist_columns(writer, output_file) -> None:
