@@ -33,15 +33,16 @@ def _find_price_update_columns_from_file(output_file: str) -> tuple:
     from openpyxl import load_workbook
     from openpyxl.utils import get_column_letter
     if not os.path.exists(output_file):
-        return None, None
+        return None, None, None
     try:
         wb = load_workbook(output_file, read_only=True)
         if 'Price_Update' not in wb.sheetnames:
             wb.close()
-            return None, None
+            return None, None, None
         ws = wb['Price_Update']
         symbol_col_letter = None
         ltp_col_letter = None
+        prev_close_col_letter = None
         
         # Check the first 10 rows and 100 columns
         for row_idx in range(1, 11):
@@ -54,22 +55,25 @@ def _find_price_update_columns_from_file(output_file: str) -> tuple:
                         symbol_col_letter = get_column_letter(col_idx)
                     elif header in ['LTP', 'LAST TRADED PRICE', 'LAST_TRADED_PRICE', 'PRICE']:
                         ltp_col_letter = get_column_letter(col_idx)
-            if symbol_col_letter and ltp_col_letter:
+                    elif header in ['PREVIOUS DAY CLOSE', 'PREV DAY CLOSE', 'PREV_DAY_CLOSE']:
+                        prev_close_col_letter = get_column_letter(col_idx)
+            if symbol_col_letter and ltp_col_letter and prev_close_col_letter:
                 break
                 
         wb.close()
-        return symbol_col_letter, ltp_col_letter
+        return symbol_col_letter, ltp_col_letter, prev_close_col_letter
     except Exception:
-        return None, None
+        return None, None, None
 
 def _convert_portfolios_to_formulas(portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, output_file: str) -> tuple:
     """
     Converts LTP and its dependent calculations to standard Excel formulas.
     Returns (portfolio_write_df, overall_write_df).
     """
-    sym_col_let, ltp_col_let = _find_price_update_columns_from_file(output_file)
+    sym_col_let, ltp_col_let, prev_close_col_let = _find_price_update_columns_from_file(output_file)
     sym_col_let = sym_col_let or 'A'
     ltp_col_let = ltp_col_let or 'F'
+    prev_close_col_let = prev_close_col_let or 'I'
     
     port_f = portfolio_df.copy()
     over_f = overall_df.copy()
@@ -77,7 +81,7 @@ def _convert_portfolios_to_formulas(portfolio_df: pd.DataFrame, overall_df: pd.D
     # 1. Update Current_Portfolio
     if len(port_f) > 0:
         # Convert columns to object type to support string formulas
-        for col in ['LTP', 'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Current_Value', 'Unrealized_PnL', 'Return_Pct']:
+        for col in ['LTP', 'Prev_Day_Close', 'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Current_Value', 'Unrealized_PnL', 'Return_Pct', 'Trend']:
             if col in port_f.columns:
                 port_f[col] = port_f[col].astype(object)
                 
@@ -86,13 +90,19 @@ def _convert_portfolios_to_formulas(portfolio_df: pd.DataFrame, overall_df: pd.D
             fallback_ltp = row['LTP']
             if pd.isna(fallback_ltp):
                 fallback_ltp = 0.0
+            fallback_prev_close = row.get('Prev_Day_Close', 0.0)
+            if pd.isna(fallback_prev_close):
+                fallback_prev_close = 0.0
                 
             port_f.at[p_idx, 'LTP'] = f"=IFERROR(INDEX(Price_Update!${ltp_col_let}:${ltp_col_let}, MATCH(A{r}, Price_Update!${sym_col_let}:${sym_col_let}, 0)), {fallback_ltp})"
-            port_f.at[p_idx, 'LTP_SL_Diff'] = f"=L{r}-H{r}"
-            port_f.at[p_idx, 'LTP_SL_Diff_Pct'] = f"=IF(L{r}>0, (L{r}-H{r})/L{r}, 0)"
-            port_f.at[p_idx, 'Current_Value'] = f"=F{r}*L{r}"
-            port_f.at[p_idx, 'Unrealized_PnL'] = f"=S{r}-K{r}"
-            port_f.at[p_idx, 'Return_Pct'] = f"=IF(K{r}>0, T{r}/K{r}, 0)"
+            if 'Prev_Day_Close' in port_f.columns:
+                port_f.at[p_idx, 'Prev_Day_Close'] = f"=IFERROR(INDEX(Price_Update!${prev_close_col_let}:${prev_close_col_let}, MATCH(A{r}, Price_Update!${sym_col_let}:${sym_col_let}, 0)), {fallback_prev_close})"
+            port_f.at[p_idx, 'Trend'] = f'=IF(M{r}>N{r}, "▲", IF(M{r}<N{r}, "▼", "─"))'
+            port_f.at[p_idx, 'LTP_SL_Diff'] = f"=M{r}-I{r}"
+            port_f.at[p_idx, 'LTP_SL_Diff_Pct'] = f"=IF(M{r}>0, (M{r}-I{r})/M{r}, 0)"
+            port_f.at[p_idx, 'Current_Value'] = f"=F{r}*M{r}"
+            port_f.at[p_idx, 'Unrealized_PnL'] = f"=T{r}-L{r}"
+            port_f.at[p_idx, 'Return_Pct'] = f"=IF(L{r}>0, U{r}/L{r}, 0)"
             
     # 2. Update Overall_Portfolio
     if len(over_f) > 0:
@@ -222,7 +232,7 @@ def save_workbook(
 
                 _apply_number_format(
                     writer, portfolio_df, 'Current_Portfolio',
-                    columns=['LTP_SL_Diff_Pct'],
+                    columns=['LTP_SL_Diff_Pct', 'Return_Pct', 'XIRR'],
                     number_format='0.00%'
                 )
 
@@ -404,7 +414,7 @@ def save_workbook(
 
             _apply_number_format(
                 writer, portfolio_df, 'Current_Portfolio',
-                columns=['LTP_SL_Diff_Pct'],
+                columns=['LTP_SL_Diff_Pct', 'Return_Pct', 'XIRR'],
                 number_format='0.00%'
             )
 
@@ -591,6 +601,33 @@ def _apply_ltp_comparison_formatting(writer, df: pd.DataFrame, sheet_name: str) 
             
             worksheet.conditional_formatting.add(range_str, green_rule)
             worksheet.conditional_formatting.add(range_str, pink_rule)
+
+    # 2. Apply Trend column color formatting
+    if 'Trend' in col_map:
+        trend_idx = col_map['Trend']
+        trend_letter = get_column_letter(trend_idx)
+        range_str = f"{trend_letter}2:{trend_letter}{len(df) + 1}"
+        
+        # Center align Trend cells
+        from openpyxl.styles import Alignment
+        center_align = Alignment(horizontal='center')
+        for r_idx in range(2, len(df) + 2):
+            worksheet.cell(row=r_idx, column=trend_idx).alignment = center_align
+
+        # Red and Green fonts for up and down arrows
+        from openpyxl.styles import Font
+        GREEN_FONT = Font(name='Calibri', bold=True, color='147A1E')
+        RED_FONT = Font(name='Calibri', bold=True, color='C00000')
+        
+        from openpyxl.formatting.rule import CellIsRule
+        worksheet.conditional_formatting.add(
+            range_str,
+            CellIsRule(operator='equal', formula=['"▲"'], font=GREEN_FONT)
+        )
+        worksheet.conditional_formatting.add(
+            range_str,
+            CellIsRule(operator='equal', formula=['"▼"'], font=RED_FONT)
+        )
 
 
 def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file: str) -> None:

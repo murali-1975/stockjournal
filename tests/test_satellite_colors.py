@@ -99,7 +99,7 @@ class TestSatelliteColors(unittest.TestCase):
         gael_cell = ws.cell(row=5, column=1)
         self.assertEqual(gael_cell.value, "GAEL")
         self.assertTrue(gael_cell.fill is None or gael_cell.fill.fill_type is None)
-        self.assertFalse(gael_cell.font.bold)
+        self.assertTrue(gael_cell.font.bold)  # Font is bold dark red when missing from watchlist
 
         wb.close()
 

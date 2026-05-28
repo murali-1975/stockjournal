@@ -378,6 +378,43 @@ def _get_latest_tranche_cheat(symbol: str, grouped_df: pd.DataFrame) -> str:
     return ''
 
 
+def _get_chronological_holding_dates(df_copy: pd.DataFrame) -> dict:
+    """
+    Simulates trade history chronologically per symbol to find:
+    - fresh_buy_date: First buy date of the latest holding cycle.
+    - last_sell_date: The date when the stock was last fully exited (or NaT if active).
+    """
+    symbol_holding_dates = {}
+    for symbol, group in df_copy.groupby('Symbol'):
+        trades = group.sort_values(by='Trade Date')
+        
+        current_qty = 0.0
+        fresh_buy_date = pd.NaT
+        last_sell_date = pd.NaT
+        
+        for _, trade in trades.iterrows():
+            t_type = str(trade['Trade Type']).lower()
+            qty = float(trade['Quantity'])
+            t_date = trade['Trade Date']
+            
+            if t_type == 'buy':
+                if current_qty <= 1e-5:
+                    fresh_buy_date = t_date
+                    current_qty = 0.0
+                current_qty += qty
+            elif t_type == 'sell':
+                current_qty -= qty
+                if current_qty <= 1e-5:
+                    current_qty = 0.0
+                    last_sell_date = t_date
+                    
+        symbol_holding_dates[symbol] = {
+            'fresh_buy_date': fresh_buy_date,
+            'last_sell_date': last_sell_date
+        }
+    return symbol_holding_dates
+
+
 def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dict = None, price_updates: dict = None) -> tuple:
     """
     Calculates current holdings, overall trade summary, and PnL statistics.
@@ -498,12 +535,18 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     # --- Holding Period (days) ---
     overall_df = overall_df.merge(first_buy, on='Symbol', how='left')
     overall_df = overall_df.merge(sells_dates, on='Symbol', how='left')
-    # If fully sold (Current_Quantity == 0), use last sell date; otherwise use today
+    
+    # Chronological holding period simulation
+    holding_dates = _get_chronological_holding_dates(df_copy)
+    overall_df['Fresh_Buy_Date'] = overall_df['Symbol'].map(lambda sym: holding_dates.get(sym, {}).get('fresh_buy_date', pd.NaT))
+    overall_df['Cycle_Last_Sell_Date'] = overall_df['Symbol'].map(lambda sym: holding_dates.get(sym, {}).get('last_sell_date', pd.NaT))
+    
+    # If fully sold (Current_Quantity == 0), use last sell date of that cycle; otherwise use today
     overall_df['Holding_End'] = overall_df.apply(
-        lambda row: row['Last_Sell_Date'] if row['Current_Quantity'] == 0 and pd.notna(row['Last_Sell_Date']) else today,
+        lambda row: row['Cycle_Last_Sell_Date'] if row['Current_Quantity'] == 0 and pd.notna(row['Cycle_Last_Sell_Date']) else today,
         axis=1
     )
-    overall_df['Holding_Period'] = (overall_df['Holding_End'] - overall_df['First_Buy_Date']).dt.days
+    overall_df['Holding_Period'] = (overall_df['Holding_End'] - overall_df['Fresh_Buy_Date']).dt.days
     overall_df['Holding_Period'] = overall_df['Holding_Period'].fillna(0).astype(int)
 
     # --- Load applied splits to correctly set Adj_Required flag ---
@@ -539,10 +582,16 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     ]
     overall_df = overall_df[cols_order].sort_values(by='Symbol')
 
+    # --- Dynamic Trend Indicator Column (Python fallback values) ---
+    overall_df['Trend'] = np.where(
+        overall_df['LTP'] > overall_df['Prev_Day_Close'], "▲",
+        np.where(overall_df['LTP'] < overall_df['Prev_Day_Close'], "▼", "─")
+    )
+
     # --- Current Portfolio View (only active positions) ---
     portfolio_df = overall_df[overall_df['Current_Quantity'] > 0][
         ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
-         'Current_Quantity', 'Average_Buy_Price', 'Invested_Value', 'LTP',
+         'Current_Quantity', 'Average_Buy_Price', 'Trend', 'Invested_Value', 'LTP',
          'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
          'Holding_Period', 'Split_Info', 'Adj_Required']
     ].copy()
@@ -604,12 +653,18 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
 
     # Reorder Current Portfolio columns
     port_cols = ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
-                 'Current_Quantity', 'Average_Buy_Price', 'SL',
+                 'Current_Quantity', 'Average_Buy_Price', 'Trend', 'SL',
                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
                  'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
                  'Return_Pct', 'XIRR',
                  'Holding_Period', 'Split_Info', 'Adj_Required']
     portfolio_df = portfolio_df[port_cols]
+
+    # Sort Current Portfolio: Core first, then Satellite, then alphabetically by Symbol
+    portfolio_df['TF_Classification_Sort'] = portfolio_df['TF_Classification'].map(
+        lambda x: 0 if 'Core' in str(x) else (1 if 'Satellite' in str(x) else 2)
+    )
+    portfolio_df = portfolio_df.sort_values(by=['TF_Classification_Sort', 'Symbol']).drop(columns=['TF_Classification_Sort'])
 
     # Remove EMA, Previous Day, and Previous Week Close columns from Overall Portfolio (only needed in Current Portfolio)
     overall_df = overall_df.drop(columns=['EMA9', 'EMA10', 'EMA11', 'EMA21', 'Prev_Day_Close', 'Prev_Week_Close'])

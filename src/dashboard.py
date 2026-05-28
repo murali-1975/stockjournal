@@ -135,7 +135,7 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     ws = wb.create_sheet('Dashboard', 0)
 
     # Column widths
-    widths = {'A': 24, 'B': 18, 'C': 18, 'D': 18, 'E': 18, 'F': 18, 'G': 18,
+    widths = {'A': 24, 'B': 18, 'C': 18, 'D': 24, 'E': 18, 'F': 18, 'G': 18,
               'H': 4,  # spacer
               'I': 24, 'J': 18, 'K': 18, 'L': 18}
     for col, w in widths.items():
@@ -176,9 +176,12 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     # ══════════════════════════════════════════════════════════════════
 
     row = 3
+    _write_performance_kpis(ws, row, col_start=4)
     row = _write_kpi_table(ws, portfolio_df, overall_df, row)
     row += 2
-    row = _write_top_bottom_table(ws, portfolio_df, latest_colors, row)
+    row = _write_top_bottom_table(ws, portfolio_df, latest_colors, row, classification_filter='Satellite')
+    row += 2
+    row = _write_top_bottom_table(ws, portfolio_df, latest_colors, row, classification_filter='Core')
     row += 2
     row = _write_nearest_sl_table(ws, portfolio_df, latest_colors, row)
     row += 2
@@ -250,6 +253,13 @@ def _data_cell(ws, row, col, value, fmt=None, font=None):
     return c
 
 
+def _apply_dynamic_pnl_color(ws, cell_range):
+    """Applies conditional formatting to color positive values green and negative values red."""
+    from openpyxl.formatting.rule import CellIsRule
+    ws.conditional_formatting.add(cell_range, CellIsRule(operator='greaterThan', formula=['0'], font=GREEN_FONT))
+    ws.conditional_formatting.add(cell_range, CellIsRule(operator='lessThan', formula=['0'], font=RED_FONT))
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  Table 1: Portfolio KPIs
 # ═══════════════════════════════════════════════════════════════════
@@ -261,24 +271,65 @@ def _write_kpi_table(ws, portfolio_df, overall_df, row):
 
     start_row = row
     kpis = [
-        ('Total Invested Value', f"=SUM(Current_Portfolio!$K$2:$K$1000)", INR_FMT),
-        ('Total Current Value', f"=SUM(Current_Portfolio!$S$2:$S$1000)", INR_FMT),
+        ('Total Invested Value', f"=SUM(Current_Portfolio!$L$2:$L$1000)", INR_FMT),
+        ('Total Current Value', f"=SUM(Current_Portfolio!$T$2:$T$1000)", INR_FMT),
         ('Unrealized PnL', f"=B{start_row+1}-B{start_row}", INR_FMT), # B6 - B5
         ('Realized PnL', f"=SUM(Overall_Portfolio!$P$2:$P$1000)", INR_FMT),
         ('Combined PnL', f"=B{start_row+2}+B{start_row+3}", INR_FMT), # B7 + B8
         ('Combined PnL %', f"=IF(B{start_row}>0, B{start_row+4}/B{start_row}, 0)", PCT_FMT), # B9 / B5
-        ('Core Allocation (%)', f"=SUMIF(Current_Portfolio!$D$2:$D$1000, \"Core\", Current_Portfolio!$K$2:$K$1000) / B{start_row}", PCT_FMT),
-        ('Satellite Allocation (%)', f"=SUMIF(Current_Portfolio!$D$2:$D$1000, \"Satellite\", Current_Portfolio!$K$2:$K$1000) / B{start_row}", PCT_FMT),
+        ('Core Allocation (%)', f"=IF(B{start_row}>0, SUMIF(Current_Portfolio!$D$2:$D$1000, \"Core\", Current_Portfolio!$L$2:$L$1000) / B{start_row}, 0)", PCT_FMT),
+        ('Satellite Allocation (%)', f"=IF(B{start_row}>0, SUMIF(Current_Portfolio!$D$2:$D$1000, \"Satellite\", Current_Portfolio!$L$2:$L$1000) / B{start_row}, 0)", PCT_FMT),
         ('Active Holdings', f"=COUNTA(Current_Portfolio!$A$2:$A$1000)", '0'),
         ('Total Stocks Traded', f"=COUNTA(Overall_Portfolio!$A$2:$A$1000)", '0'),
     ]
 
     for label, formula, fmt in kpis:
         _data_cell(ws, row, 1, label, font=LABEL_FONT)
-        pnl_font = None
+        _data_cell(ws, row, 2, formula, fmt=fmt)
         if 'PnL' in label:
-            pnl_font = GREEN_FONT
-        _data_cell(ws, row, 2, formula, fmt=fmt, font=pnl_font)
+            _apply_dynamic_pnl_color(ws, f"B{row}")
+        row += 1
+
+    return row
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Table 1b: Performance Metrics (Win/Loss, Risk/Reward)
+# ═══════════════════════════════════════════════════════════════════
+
+def _write_performance_kpis(ws, start_row, col_start):
+    """Writes Win/Loss and Risk/Reward metrics. Returns next free row."""
+    row = _section_title(ws, start_row, col_start, 'Trading Performance')
+    row = _styled_header(ws, row, col_start, ['Metric', 'Realized (Closed)', 'Unrealized (Open)'])
+    
+    col_e = get_column_letter(col_start + 1)
+    col_f = get_column_letter(col_start + 2)
+    
+    metrics = [
+        ('Winning Trades', 
+         f"=COUNTIF(Overall_Portfolio!$P$2:$P$1000, \">0\")", 
+         f"=COUNTIF(Current_Portfolio!$U$2:$U$1000, \">0\")", '0'),
+        ('Losing Trades', 
+         f"=COUNTIF(Overall_Portfolio!$P$2:$P$1000, \"<0\")", 
+         f"=COUNTIF(Current_Portfolio!$U$2:$U$1000, \"<0\")", '0'),
+        ('Win / Loss Ratio', 
+         f"=IF({col_e}{row+1}>0, {col_e}{row}/{col_e}{row+1}, IF({col_e}{row}>0, \"No Loss\", 0))", 
+         f"=IF({col_f}{row+1}>0, {col_f}{row}/{col_f}{row+1}, IF({col_f}{row}>0, \"No Loss\", 0))", '0.00'),
+        ('Avg Win (₹)', 
+         f"=IF({col_e}{row}>0, SUMIF(Overall_Portfolio!$P$2:$P$1000, \">0\")/{col_e}{row}, 0)", 
+         f"=IF({col_f}{row}>0, SUMIF(Current_Portfolio!$U$2:$U$1000, \">0\")/{col_f}{row}, 0)", INR_FMT),
+        ('Avg Loss (₹)', 
+         f"=IF({col_e}{row+1}>0, SUMIF(Overall_Portfolio!$P$2:$P$1000, \"<0\")/{col_e}{row+1}, 0)", 
+         f"=IF({col_f}{row+1}>0, SUMIF(Current_Portfolio!$U$2:$U$1000, \"<0\")/{col_f}{row+1}, 0)", INR_FMT),
+        ('Risk / Reward Ratio', 
+         f"=IF({col_e}{row+4}<0, ABS({col_e}{row+3}/{col_e}{row+4}), 0)", 
+         f"=IF({col_f}{row+4}<0, ABS({col_f}{row+3}/{col_f}{row+4}), 0)", '0.00')
+    ]
+    
+    for label, form_r, form_u, fmt in metrics:
+        _data_cell(ws, row, col_start, label, font=LABEL_FONT)
+        _data_cell(ws, row, col_start + 1, form_r, fmt=fmt)
+        _data_cell(ws, row, col_start + 2, form_u, fmt=fmt)
         row += 1
 
     return row
@@ -288,18 +339,29 @@ def _write_kpi_table(ws, portfolio_df, overall_df, row):
 #  Table 2: Top 5 Gainers / Bottom 5 Losers
 # ═══════════════════════════════════════════════════════════════════
 
-def _write_top_bottom_table(ws, df, latest_colors, row):
-    row = _section_title(ws, row, 1, 'Top 5 Gainers / Bottom 5 Losers')
+def _write_top_bottom_table(ws, df, latest_colors, row, classification_filter='Satellite'):
+    title = f'Top 5 Gainers / Bottom 5 Losers ({classification_filter})'
+    row = _section_title(ws, row, 1, title)
     row = _styled_header(ws, row, 1, ['Symbol', 'Classification', 'Invested (₹)', 'Current (₹)', 'PnL (₹)', 'PnL %'])
     
     if df.empty or 'Unrealized_PnL' not in df.columns:
         _data_cell(ws, row, 1, 'No data')
         return row + 1
 
-    df['Unrealized_PnL'] = pd.to_numeric(df['Unrealized_PnL'], errors='coerce').fillna(0)
+    # Filter dataframe by classification
+    if 'TF_Classification' in df.columns:
+        filtered_df = df[df['TF_Classification'].str.contains(classification_filter, case=False, na=False)].copy()
+    else:
+        filtered_df = df.copy()
+
+    if filtered_df.empty:
+        _data_cell(ws, row, 1, f'No {classification_filter} data')
+        return row + 1
+
+    filtered_df['Unrealized_PnL'] = pd.to_numeric(filtered_df['Unrealized_PnL'], errors='coerce').fillna(0)
     
-    top5 = df.nlargest(5, 'Unrealized_PnL')
-    bot5 = df.nsmallest(5, 'Unrealized_PnL')
+    top5 = filtered_df.nlargest(5, 'Unrealized_PnL')
+    bot5 = filtered_df.nsmallest(5, 'Unrealized_PnL')
     combined = pd.concat([top5, bot5]).drop_duplicates(subset='Symbol')
     combined = combined.sort_values('Unrealized_PnL', ascending=False)
 
@@ -314,13 +376,13 @@ def _write_top_bottom_table(ws, df, latest_colors, row):
         _data_cell(ws, row, 2, classification)
         
         # Dynamic lookup and computation formulas
-        _data_cell(ws, row, 3, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Y$1000, 11, FALSE)", fmt=INR_FMT)
-        _data_cell(ws, row, 4, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Y$1000, 19, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 3, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Z$1000, 12, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 4, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Z$1000, 20, FALSE)", fmt=INR_FMT)
         
-        pnl = s.get('Unrealized_PnL', 0)
-        pnl_font = GREEN_FONT if pnl > 0 else RED_FONT if pnl < 0 else None
-        _data_cell(ws, row, 5, f"=D{row}-C{row}", fmt=INR_FMT, font=pnl_font)
-        _data_cell(ws, row, 6, f"=IF(C{row}>0, E{row}/C{row}, 0)", fmt=PCT_FMT, font=pnl_font)
+        _data_cell(ws, row, 5, f"=D{row}-C{row}", fmt=INR_FMT)
+        _data_cell(ws, row, 6, f"=IF(C{row}>0, E{row}/C{row}, 0)", fmt=PCT_FMT)
+        _apply_dynamic_pnl_color(ws, f"E{row}")
+        _apply_dynamic_pnl_color(ws, f"F{row}")
         row += 1
 
     return row
@@ -341,6 +403,10 @@ def _write_nearest_sl_table(ws, df, latest_colors, row):
 
     df['LTP_SL_Diff_Pct'] = pd.to_numeric(df['LTP_SL_Diff_Pct'], errors='coerce').fillna(0)
     
+    # Exclude Core stocks from stop loss dashboard
+    if 'TF_Classification' in df.columns:
+        df = df[~df['TF_Classification'].str.contains('Core', case=False, na=False)]
+    
     nearest = df.nsmallest(10, 'LTP_SL_Diff_Pct')
 
     for _, s in nearest.iterrows():
@@ -354,14 +420,15 @@ def _write_nearest_sl_table(ws, df, latest_colors, row):
         _data_cell(ws, row, 2, classification)
         
         # Dynamic stop loss calculations
-        _data_cell(ws, row, 3, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Y$1000, 12, FALSE)", fmt=INR_FMT)
-        _data_cell(ws, row, 4, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Y$1000, 8, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 3, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Z$1000, 13, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 4, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Z$1000, 9, FALSE)", fmt=INR_FMT)
         _data_cell(ws, row, 5, f"=C{row}-D{row}", fmt=INR_FMT)
         
-        diff_pct = s.get('LTP_SL_Diff_Pct', 0.0)
-        pnl_font = RED_FONT if diff_pct < 0.05 else (GREEN_FONT if diff_pct > 0.15 else None)
-        _data_cell(ws, row, 6, f"=IF(C{row}>0, E{row}/C{row}, 0)", fmt=PCT_FMT, font=pnl_font)
-        _data_cell(ws, row, 7, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Y$1000, 5, FALSE)")
+        _data_cell(ws, row, 6, f"=IF(C{row}>0, E{row}/C{row}, 0)", fmt=PCT_FMT)
+        _data_cell(ws, row, 7, f"=VLOOKUP(A{row}, Current_Portfolio!$A$2:$Z$1000, 5, FALSE)")
+        from openpyxl.formatting.rule import CellIsRule
+        ws.conditional_formatting.add(f"F{row}", CellIsRule(operator='lessThan', formula=['0.05'], font=RED_FONT))
+        ws.conditional_formatting.add(f"F{row}", CellIsRule(operator='greaterThan', formula=['0.15'], font=GREEN_FONT))
         row += 1
 
     return row
@@ -389,7 +456,8 @@ def _write_benchmark_returns_table(ws, benchmark_returns: dict, row: int, price_
         # Dynamic index lookup from Price_Update sheet
         _data_cell(ws, row, 11, f"=IFERROR(INDEX(Price_Update!${ltp_col_let}:${ltp_col_let}, MATCH(I{row}, Price_Update!${sym_col_let}:${sym_col_let}, 0)), {data.get('LTP', 0)})", fmt=INR_FMT)
         
-        _data_cell(ws, row, 12, f"=(K{row}-J{row})/J{row}", fmt=PCT_FMT, font=GREEN_FONT)
+        _data_cell(ws, row, 12, f"=(K{row}-J{row})/J{row}", fmt=PCT_FMT)
+        _apply_dynamic_pnl_color(ws, f"L{row}")
         row += 1
         
     return row
@@ -419,16 +487,18 @@ def _write_cap_allocation(ws, df, row):
     for idx, (label, row_data) in enumerate(grouped.iterrows()):
         r = start_row + idx
         _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 10, f"=SUMIF(Current_Portfolio!$B$2:$B$1000, \"{label}\", Current_Portfolio!$K$2:$K$1000)", fmt=INR_FMT)
+        _data_cell(ws, row, 10, f"=SUMIF(Current_Portfolio!$B$2:$B$1000, \"{label}\", Current_Portfolio!$L$2:$L$1000)", fmt=INR_FMT)
         _data_cell(ws, row, 11, f"=J{r}/$J${total_row_idx}", fmt=PCT_FMT)
-        _data_cell(ws, row, 12, f"=(SUMIF(Current_Portfolio!$B$2:$B$1000, \"{label}\", Current_Portfolio!$S$2:$S$1000) - J{r}) / J{r}", fmt=PCT_FMT, font=GREEN_FONT)
+        _data_cell(ws, row, 12, f"=(SUMIF(Current_Portfolio!$B$2:$B$1000, \"{label}\", Current_Portfolio!$T$2:$T$1000) - J{r}) / J{r}", fmt=PCT_FMT)
+        _apply_dynamic_pnl_color(ws, f"L{row}")
         row += 1
 
     # Total row
     _data_cell(ws, row, 9, 'TOTAL', font=LABEL_FONT)
     _data_cell(ws, row, 10, f"=SUM(J{start_row}:J{row-1})", fmt=INR_FMT, font=LABEL_FONT)
     _data_cell(ws, row, 11, 1.0, fmt=PCT_FMT, font=LABEL_FONT)
-    _data_cell(ws, row, 12, f"=(SUM(Current_Portfolio!$S$2:$S$1000) - J{row}) / J{row}", fmt=PCT_FMT, font=GREEN_FONT)
+    _data_cell(ws, row, 12, f"=(SUM(Current_Portfolio!$T$2:$T$1000) - J{row}) / J{row}", fmt=PCT_FMT)
+    _apply_dynamic_pnl_color(ws, f"L{row}")
     row += 1
 
     return row
@@ -457,7 +527,7 @@ def _write_classification_allocation(ws, df, row):
     for idx, (label, val) in enumerate(grouped.items()):
         r = start_row + idx
         _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 10, f"=SUMIF(Current_Portfolio!$D$2:$D$1000, \"{label}\", Current_Portfolio!$K$2:$K$1000)", fmt=INR_FMT)
+        _data_cell(ws, row, 10, f"=SUMIF(Current_Portfolio!$D$2:$D$1000, \"{label}\", Current_Portfolio!$L$2:$L$1000)", fmt=INR_FMT)
         _data_cell(ws, row, 11, f"=J{r}/$J${total_row_idx}", fmt=PCT_FMT)
         row += 1
 
@@ -492,7 +562,7 @@ def _write_sector_allocation(ws, df, row):
     for idx, (label, val) in enumerate(grouped.items()):
         r = start_row + idx
         _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 10, f"=SUMIF(Current_Portfolio!$C$2:$C$1000, \"{label}\", Current_Portfolio!$K$2:$K$1000)", fmt=INR_FMT)
+        _data_cell(ws, row, 10, f"=SUMIF(Current_Portfolio!$C$2:$C$1000, \"{label}\", Current_Portfolio!$L$2:$L$1000)", fmt=INR_FMT)
         _data_cell(ws, row, 11, f"=J{r}/$J${total_row_idx}", fmt=PCT_FMT)
         row += 1
 
@@ -540,8 +610,8 @@ def _write_core_satellite_sector_allocation(ws, df, row):
     for idx, (sector, row_data) in enumerate(combined.iterrows()):
         r = start_row + idx
         _data_cell(ws, row, 9, str(sector), font=LABEL_FONT)
-        _data_cell(ws, row, 10, f"=SUMIFS(Current_Portfolio!$K$2:$K$1000, Current_Portfolio!$C$2:$C$1000, \"{sector}\", Current_Portfolio!$D$2:$D$1000, \"*Core*\")", fmt=INR_FMT)
-        _data_cell(ws, row, 11, f"=SUMIFS(Current_Portfolio!$K$2:$K$1000, Current_Portfolio!$C$2:$C$1000, \"{sector}\", Current_Portfolio!$D$2:$D$1000, \"*Satellite*\")", fmt=INR_FMT)
+        _data_cell(ws, row, 10, f"=SUMIFS(Current_Portfolio!$L$2:$L$1000, Current_Portfolio!$C$2:$C$1000, \"{sector}\", Current_Portfolio!$D$2:$D$1000, \"*Core*\")", fmt=INR_FMT)
+        _data_cell(ws, row, 11, f"=SUMIFS(Current_Portfolio!$L$2:$L$1000, Current_Portfolio!$C$2:$C$1000, \"{sector}\", Current_Portfolio!$D$2:$D$1000, \"*Satellite*\")", fmt=INR_FMT)
         _data_cell(ws, row, 12, f"=J{r}+K{r}", fmt=INR_FMT)
         row += 1
 
@@ -576,9 +646,10 @@ def _write_pnl_by_cap(ws, overall_df, row):
     for idx, (cat, vals) in enumerate(grouped.iterrows()):
         r = start_row + idx
         _data_cell(ws, row, 9, str(cat), font=LABEL_FONT)
-        _data_cell(ws, row, 10, f"=SUMIF(Overall_Portfolio!$B$2:$B$1000, \"{cat}\", Overall_Portfolio!$P$2:$P$1000)", fmt=INR_FMT, font=GREEN_FONT)
-        _data_cell(ws, row, 11, f"=SUMIF(Current_Portfolio!$B$2:$B$1000, \"{cat}\", Current_Portfolio!$T$2:$T$1000)", fmt=INR_FMT, font=GREEN_FONT)
-        _data_cell(ws, row, 12, f"=J{r}+K{r}", fmt=INR_FMT, font=GREEN_FONT)
+        _data_cell(ws, row, 10, f"=SUMIF(Overall_Portfolio!$B$2:$B$1000, \"{cat}\", Overall_Portfolio!$P$2:$P$1000)", fmt=INR_FMT)
+        _data_cell(ws, row, 11, f"=SUMIF(Current_Portfolio!$B$2:$B$1000, \"{cat}\", Current_Portfolio!$U$2:$U$1000)", fmt=INR_FMT)
+        _data_cell(ws, row, 12, f"=J{r}+K{r}", fmt=INR_FMT)
+        _apply_dynamic_pnl_color(ws, f"J{row}:L{row}")
         row += 1
 
     # Total row
@@ -586,6 +657,7 @@ def _write_pnl_by_cap(ws, overall_df, row):
     _data_cell(ws, row, 10, f"=SUM(J{start_row}:J{row-1})", fmt=INR_FMT, font=LABEL_FONT)
     _data_cell(ws, row, 11, f"=SUM(K{start_row}:K{row-1})", fmt=INR_FMT, font=LABEL_FONT)
     _data_cell(ws, row, 12, f"=SUM(L{start_row}:L{row-1})", fmt=INR_FMT, font=LABEL_FONT)
+    _apply_dynamic_pnl_color(ws, f"J{row}:L{row}")
     row += 1
 
     return row
@@ -657,8 +729,8 @@ def _write_corporate_actions(ws, portfolio_df, overall_df, latest_colors, row):
     row = _section_title(ws, row, 1, '🔔 Corporate Actions (Splits / Bonus)')
     row = _styled_header(ws, row, 1, ['Symbol', 'Split / Bonus Details', 'Adj Required'])
 
-    # Combine both portfolios and filter for rows with split info
-    all_stocks = pd.concat([portfolio_df, overall_df]).drop_duplicates(subset='Symbol')
+    # Filter for rows with split info in current portfolio only
+    all_stocks = portfolio_df.copy()
 
     if 'Split_Info' not in all_stocks.columns or len(all_stocks) == 0:
         _data_cell(ws, row, 1, 'No corporate actions detected')
@@ -789,13 +861,10 @@ def _write_portfolio_movers_table(ws, df, watchlist_df, latest_colors, row):
         c = _data_cell(ws, row, 9, symbol, font=font)
         if fill: c.fill = fill
         
-        _data_cell(ws, row, 10, f"=VLOOKUP(I{row}, Current_Portfolio!$A$2:$Y$1000, 14, FALSE)", fmt=INR_FMT)
-        _data_cell(ws, row, 11, f"=VLOOKUP(I{row}, Current_Portfolio!$A$2:$Y$1000, 12, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 10, f"=VLOOKUP(I{row}, Current_Portfolio!$A$2:$Z$1000, 15, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 11, f"=VLOOKUP(I{row}, Current_Portfolio!$A$2:$Z$1000, 13, FALSE)", fmt=INR_FMT)
         _data_cell(ws, row, 12, f"=IF(J{row}>0, (K{row}-J{row})/J{row}, 0)", fmt=PCT_FMT)
-        
-        pct = s.get('Pct_Change', 0)
-        pnl_font = GREEN_FONT if pct > 0 else RED_FONT if pct < 0 else None
-        ws.cell(row=row, column=12).font = pnl_font
+        _apply_dynamic_pnl_color(ws, f"L{row}")
         
         row += 1
         
@@ -869,7 +938,8 @@ def _write_watchlist_movers_table(ws, watchlist_df, portfolio_df, latest_colors,
         
         _data_cell(ws, row, 10, s.get('Previous week Close', 0), fmt=INR_FMT)
         _data_cell(ws, row, 11, s.get('Price', 0), fmt=INR_FMT)
-        _data_cell(ws, row, 12, s.get('Pct_Change', 0), fmt=PCT_FMT, font=GREEN_FONT)
+        _data_cell(ws, row, 12, s.get('Pct_Change', 0), fmt=PCT_FMT)
+        _apply_dynamic_pnl_color(ws, f"L{row}")
         
         row += 1
         

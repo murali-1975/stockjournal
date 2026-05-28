@@ -177,6 +177,35 @@ def _apply_sheet_styles(worksheet, df):
                     rules.append(rule_green)
                     rules.append(rule_pink)
             
+            # Apply conditional formatting for Trend column
+            if 'Trend' in col_map:
+                trend_idx = col_map['Trend']
+                trend_letter = gspread.utils.rowcol_to_a1(1, trend_idx).rstrip('0123456789')
+                gr_t = GridRange.from_a1_range(f'{trend_letter}2:{trend_letter}{len(df)+1}', worksheet)
+                
+                # Align Trend column to center
+                formats.append({
+                    "range": f'{trend_letter}2:{trend_letter}{len(df)+1}',
+                    "format": cellFormat(horizontalAlignment='CENTER')
+                })
+                
+                rule_up = ConditionalFormatRule(
+                    ranges=[gr_t],
+                    booleanRule=BooleanRule(
+                        condition=BooleanCondition(type='TEXT_EQ', values=['▲']),
+                        format=CellFormat(textFormat=textFormat(bold=True, foregroundColor=Color(20/255, 122/255, 30/255)))
+                    )
+                )
+                rule_down = ConditionalFormatRule(
+                    ranges=[gr_t],
+                    booleanRule=BooleanRule(
+                        condition=BooleanCondition(type='TEXT_EQ', values=['▼']),
+                        format=CellFormat(textFormat=textFormat(bold=True, foregroundColor=Color(192/255, 0/255, 0/255)))
+                    )
+                )
+                rules.append(rule_up)
+                rules.append(rule_down)
+            
             rules.save()
 
     # Apply all formats in ONE call

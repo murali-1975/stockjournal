@@ -94,6 +94,84 @@ class TestDashboard(unittest.TestCase):
         ws = self.wb['Dashboard']
         self.assertEqual(ws['A1'].value, '📊 Portfolio Dashboard')
 
+    def test_corporate_actions_filter(self):
+        """Corporate actions should only include current portfolio stocks."""
+        # Add a split to a current portfolio stock to see if it's picked up
+        self.portfolio_df.loc[0, 'Split_Info'] = '1:1 Bonus'
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        ws = self.wb['Dashboard']
+        
+        # Check all cells to ensure WIPRO (which has a split but is only in overall_df) is NOT in the dashboard
+        found_wipro = False
+        found_tcs_split = False
+        for row in ws.iter_rows(values_only=True):
+            if row:
+                if 'WIPRO' in row:
+                    found_wipro = True
+                if '1:1 Bonus' in row:
+                    found_tcs_split = True
+        
+        self.assertFalse(found_wipro, "WIPRO from overall_df should not appear in corporate actions.")
+        self.assertTrue(found_tcs_split, "TCS split from current portfolio should appear.")
+
+    def test_stop_loss_excludes_core(self):
+        """Stop loss dashboard should exclude Core stocks."""
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        ws = self.wb['Dashboard']
+        
+        # The stop loss section is titled '⚠️ Stocks Nearest to Stop Loss'
+        sl_section_started = False
+        core_stock_found = False
+        satellite_stock_found = False
+        
+        for row in ws.iter_rows(values_only=True):
+            if row and row[0] == '⚠️ Stocks Nearest to Stop Loss':
+                sl_section_started = True
+                
+            if sl_section_started and row and row[0]:
+                if row[0] == 'TCS': # TCS is Core
+                    core_stock_found = True
+                if row[0] == 'INFY': # INFY is Satellite
+                    satellite_stock_found = True
+                    
+        self.assertFalse(core_stock_found, "TCS (Core) should not be in the Stop Loss table.")
+        self.assertTrue(satellite_stock_found, "INFY (Satellite) should be in the Stop Loss table.")
+
+    def test_top_bottom_split(self):
+        """Top 5/Bottom 5 should be split into Core and Satellite tables."""
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        ws = self.wb['Dashboard']
+        
+        satellite_header_found = False
+        core_header_found = False
+        
+        in_satellite_section = False
+        in_core_section = False
+        
+        for row in ws.iter_rows(values_only=True):
+            # Check for headers
+            if row and row[0] == 'Top 5 Gainers / Bottom 5 Losers (Satellite)':
+                satellite_header_found = True
+                in_satellite_section = True
+                in_core_section = False
+            elif row and row[0] == 'Top 5 Gainers / Bottom 5 Losers (Core)':
+                core_header_found = True
+                in_core_section = True
+                in_satellite_section = False
+            elif row and row[0] and isinstance(row[0], str) and ('Nearest to Stop Loss' in row[0] or 'Corporate Actions' in row[0] or 'Top 5 Cheat' in row[0]):
+                in_satellite_section = False
+                in_core_section = False
+                
+            # Check data rows
+            if row and len(row) >= 2:
+                classification = row[1]
+                if classification == 'Satellite':
+                    self.assertFalse(in_core_section, "Satellite stock found in Core section")
+                elif classification == 'Core':
+                    self.assertFalse(in_satellite_section, "Core stock found in Satellite section")
+                    
+        self.assertTrue(satellite_header_found, "Satellite Top/Bottom table header missing")
+        self.assertTrue(core_header_found, "Core Top/Bottom table header missing")
 
 if __name__ == '__main__':
     unittest.main()

@@ -343,6 +343,46 @@ class TestCalculatePortfolios(unittest.TestCase):
         tcs_row = portfolio_df[portfolio_df['Symbol'] == 'TCS'].iloc[0]
         self.assertEqual(tcs_row['LTP'], 3500.0)
 
+    @patch('src.calculations.fetch_market_data_from_yahoo')
+    def test_chronological_holding_period_reset(self, mock_yahoo):
+        """If a stock is bought, fully exited, and then bought again, the holding period should start from the fresh buy date."""
+        mock_yahoo.return_value = {
+            'STOCK': {'LTP': 100.0, 'EMA9': 0, 'EMA10': 0, 'EMA11': 0, 'EMA21': 0, 'Market_Cap': 10_000_000}
+        }
+        df = pd.DataFrame({
+            'Trade Date': ['2025-01-01', '2025-02-01', '2025-03-01'],
+            'Symbol': ['STOCK', 'STOCK', 'STOCK'],
+            'Trade Type': ['buy', 'sell', 'buy'],
+            'Quantity': [10, 10, 5],
+            'Price': [90.0, 95.0, 92.0]
+        })
+        grouped_df = pd.DataFrame({
+            'Trade Date': ['2025-01-01', '2025-02-01', '2025-03-01'],
+            'Symbol': ['STOCK', 'STOCK', 'STOCK'],
+            'Trade Type': ['buy', 'sell', 'buy'],
+            'Total_Quantity': [10, 10, 5],
+            'Average_Price': [90.0, 95.0, 92.0],
+            'Total_Value': [900.0, 950.0, 460.0],
+            'Tranches/Cheat': ['Tranch 1', 'N/A', 'Tranch 1']
+        })
+
+        portfolio_df, overall_df = calculate_portfolios(df, grouped_df)
+
+        # 1. Verification of overall portfolio
+        self.assertEqual(len(overall_df), 1)
+        # Holding period should be calculated from 2025-03-01 to today (not from 2025-01-01)
+        today = pd.Timestamp.now().normalize()
+        expected_hp = (today - pd.to_datetime('2025-03-01')).days
+        self.assertEqual(overall_df.iloc[0]['Holding_Period'], expected_hp)
+        
+        # 2. Verification of current portfolio (held position)
+        self.assertEqual(len(portfolio_df), 1)
+        self.assertEqual(portfolio_df.iloc[0]['Current_Quantity'], 5)
+        # Holding period should be calculated from 2025-03-01 to today (not from 2025-01-01)
+        today = pd.Timestamp.now().normalize()
+        expected_hp = (today - pd.to_datetime('2025-03-01')).days
+        self.assertEqual(portfolio_df.iloc[0]['Holding_Period'], expected_hp)
+
 
 class TestClassifyMarketCap(unittest.TestCase):
     """Test suite for the _classify_market_cap function."""
