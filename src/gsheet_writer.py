@@ -90,6 +90,7 @@ def save_to_gsheet(data_frames, sheet_name_or_id, credentials_path="credentials.
         # --- Apply custom color formatting for Satellite stocks based on Satellite_Watchlist ---
         if tab_name == 'Current_Portfolio':
             _apply_gsheet_satellite_colors(sh, worksheet, clean_df)
+            _apply_gsheet_core_colors(sh, worksheet, clean_df)
 
     # --- Update Satellite_Watchlist sheet if present in Google Sheet ---
     _update_gsheet_satellite_watchlist(sh)
@@ -253,18 +254,20 @@ def _apply_gsheet_satellite_colors(sh, current_portfolio_ws, df):
     except Exception as e:
         print(f"Note: Satellite_Watchlist sheet could not be loaded from Google Sheet: {e}")
         return
-
     try:
         watchlist_df = watchlist_df.dropna(subset=['Stock', 'Color'])
-        watchlist_df['Stock'] = watchlist_df['Stock'].astype(str).str.strip()
+        watchlist_df['Stock'] = watchlist_df['Stock'].astype(str).str.strip().str.upper()
         watchlist_df['Color'] = watchlist_df['Color'].astype(str).str.strip().str.upper()
         
-        # Sort chronologically by Date (newest first) to find the latest
         watchlist_df['Date'] = pd.to_datetime(watchlist_df['Date'], dayfirst=True, errors='coerce')
-        watchlist_df = watchlist_df.sort_values(by='Date', ascending=False)
+        watchlist_df = watchlist_df.dropna(subset=['Date'])
         
-        # Deduplicate to keep only the latest color code per stock symbol
-        latest_colors = watchlist_df.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
+        # Enforce strict latest date filtering
+        latest_colors = {}
+        if not watchlist_df.empty:
+            latest_date = watchlist_df['Date'].max()
+            watchlist_df = watchlist_df[watchlist_df['Date'] == latest_date]
+            latest_colors = watchlist_df.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
     except Exception as e:
         print(f"Error parsing Google Sheets Satellite_Watchlist data: {e}")
         return
@@ -283,7 +286,7 @@ def _apply_gsheet_satellite_colors(sh, current_portfolio_ws, df):
         row_num = i + 2 # Header is row 1
         class_val = str(row.get('TF_Classification', '')).strip()
         if class_val == 'Satellite':
-            symbol = str(row.get('Symbol', '')).strip()
+            symbol = str(row.get('Symbol', '')).strip().upper()
             if symbol in latest_colors:
                 color_name = latest_colors[symbol]
                 if color_name in GS_COLOR_MAP:
@@ -300,14 +303,133 @@ def _apply_gsheet_satellite_colors(sh, current_portfolio_ws, df):
                             textFormat=textFormat(bold=True, foregroundColor=color(fg[0], fg[1], fg[2]))
                         )
                     })
+                else:
+                    symbol_col_letter = gspread.utils.rowcol_to_a1(1, symbol_idx).rstrip('0123456789')
+                    cell_range = f'{symbol_col_letter}{row_num}'
+                    formats.append({
+                        "range": cell_range,
+                        "format": cellFormat(
+                            backgroundColor=color(1.0, 1.0, 1.0),
+                            textFormat=textFormat(bold=False, foregroundColor=color(0, 0, 0))
+                        )
+                    })
             else:
-                # Stock not in Satellite_Watchlist: Highlight in Dark Red
+                # Stock not in the latest date's watchlist: Clear background fill and restore standard style
                 symbol_col_letter = gspread.utils.rowcol_to_a1(1, symbol_idx).rstrip('0123456789')
                 cell_range = f'{symbol_col_letter}{row_num}'
                 formats.append({
                     "range": cell_range,
                     "format": cellFormat(
-                        textFormat=textFormat(bold=True, foregroundColor=color(0.545, 0.0, 0.0))
+                        backgroundColor=color(1.0, 1.0, 1.0),
+                        textFormat=textFormat(bold=False, foregroundColor=color(0, 0, 0))
+                    )
+                })
+                    
+    if formats:
+        try:
+            format_cell_ranges(current_portfolio_ws, [(f['range'], f['format']) for f in formats])
+        except Exception as e:
+            print(f"Error applying cell formats in Google Sheets: {e}")
+
+
+def _apply_gsheet_core_colors(sh, current_portfolio_ws, df):
+    """
+    Reads the Core_Watchlist sheet from the Google Sheet, finds the trend status
+    per stock symbol, and styles the Symbol column in the Current_Portfolio
+    sheet with the corresponding user color and bold black font.
+    """
+    from gspread_formatting import cellFormat, textFormat, color, format_cell_ranges
+    import pandas as pd
+    
+    # Predefined color mappings in float RGB for Google Sheets Color API
+    GS_COLOR_MAP = {
+        'Strong Trend- Green': (0.0, 176/255, 80/255),
+        'Medium Trend':        (1.0, 192/255, 0.0),
+        'Weak Trend- Red':    (220/255, 57/255, 57/255),
+        'Core-Weekly':         (177/255, 160/255, 199/255)
+    }
+
+    watchlist_ws = None
+    for name in ['Core_Watchlist', 'Core_Portfolio']:
+        try:
+            watchlist_ws = sh.worksheet(name)
+            break
+        except Exception:
+            pass
+
+    if not watchlist_ws:
+        return
+
+    try:
+        records = watchlist_ws.get_all_records()
+        if not records:
+            return
+            
+        watchlist_df = pd.DataFrame(records)
+    except Exception as e:
+        print(f"Note: Core watchlist sheet could not be loaded from Google Sheet: {e}")
+        return
+
+    try:
+        if 'Company' not in watchlist_df.columns or 'Trend Status' not in watchlist_df.columns:
+            return
+        watchlist_df = watchlist_df.dropna(subset=['Company', 'Trend Status'])
+        watchlist_df['Company'] = watchlist_df['Company'].astype(str).str.strip().str.upper()
+        watchlist_df['Trend Status'] = watchlist_df['Trend Status'].astype(str).str.strip()
+        
+        # Enforce strict latest month filtering
+        if 'Month' in watchlist_df.columns:
+            watchlist_df['Month'] = pd.to_datetime(watchlist_df['Month'], errors='coerce')
+            latest_month = watchlist_df['Month'].max()
+            watchlist_df = watchlist_df[watchlist_df['Month'] == latest_month]
+            
+        watchlist_df = watchlist_df.dropna(subset=['Company', 'Trend Status'])
+        watchlist_df['Company'] = watchlist_df['Company'].astype(str).str.strip().str.upper()
+        watchlist_df['Trend Status'] = watchlist_df['Trend Status'].astype(str).str.strip()
+        
+        latest_trends = watchlist_df.drop_duplicates(subset=['Company']).set_index('Company')['Trend Status'].to_dict()
+    except Exception as e:
+        print(f"Error parsing Google Sheets core watchlist data: {e}")
+        return
+
+    col_map = {col_name: col_idx for col_idx, col_name in enumerate(df.columns, 1)}
+    if 'Symbol' not in col_map or 'TF_Classification' not in col_map:
+        return
+
+    symbol_idx = col_map['Symbol']
+    class_idx = col_map['TF_Classification']
+
+    formats = []
+    
+    # Loop over the dataframe rows
+    for i, row in df.iterrows():
+        row_num = i + 2 # Header is row 1
+        class_val = str(row.get('TF_Classification', '')).strip()
+        if class_val == 'Core':
+            symbol = str(row.get('Symbol', '')).strip().upper()
+            if symbol in latest_trends:
+                trend = latest_trends[symbol]
+                if trend in GS_COLOR_MAP:
+                    bg = GS_COLOR_MAP[trend]
+                    
+                    symbol_col_letter = gspread.utils.rowcol_to_a1(1, symbol_idx).rstrip('0123456789')
+                    cell_range = f'{symbol_col_letter}{row_num}'
+                    
+                    formats.append({
+                        "range": cell_range,
+                        "format": cellFormat(
+                            backgroundColor=color(bg[0], bg[1], bg[2]),
+                            textFormat=textFormat(bold=True, foregroundColor=color(0, 0, 0))
+                        )
+                    })
+            else:
+                symbol_col_letter = gspread.utils.rowcol_to_a1(1, symbol_idx).rstrip('0123456789')
+                cell_range = f'{symbol_col_letter}{row_num}'
+                formats.append({
+                    "range": cell_range,
+                    "format": cellFormat(
+                        backgroundColor=color(1.0, 1.0, 1.0),
+                        textFormat=textFormat(bold=False, foregroundColor=color(0, 0, 0))
                     )
                 })
                     

@@ -17,7 +17,7 @@ Dependencies:
 """
 
 
-def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) -> dict:
+def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fetch_info: bool = True) -> dict:
     """
     Fetches LTP and EMA data from Yahoo Finance for a list of stock symbols.
 
@@ -66,7 +66,8 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
 
     try:
         # Download 2 years of data to ensure enough periods for a 21-week EMA (weekly calculations)
-        data = yf.download(symbol_ns, period="2y", progress=False)
+        # Setting threads=False to prevent yfinance from randomly deadlocking on bulk downloads
+        data = yf.download(symbol_ns, period="2y", progress=False, threads=False)
 
         if 'Close' in data:
             close_data = data['Close']
@@ -142,19 +143,20 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None) ->
                         market_data[sym][ema_key] = round(float(ema_val), 2)
 
         # Fetch Market Cap and Splits for each symbol individually
-        for sym, ns_sym in zip(symbols, symbol_ns):
-            try:
-                ticker = yf.Ticker(ns_sym)
-                info = ticker.info
-                market_data[sym]['Market_Cap'] = info.get('marketCap', 0) or 0
-                market_data[sym]['Company_Name'] = info.get('longName') or info.get('shortName') or sym
+        if fetch_info:
+            for sym, ns_sym in zip(symbols, symbol_ns):
+                try:
+                    ticker = yf.Ticker(ns_sym)
+                    info = ticker.info
+                    market_data[sym]['Market_Cap'] = info.get('marketCap', 0) or 0
+                    market_data[sym]['Company_Name'] = info.get('longName') or info.get('shortName') or sym
 
-                # Fetch split/bonus history
-                splits = ticker.splits
-                if splits is not None and not splits.empty:
-                    market_data[sym]['Splits'] = splits
-            except Exception:
-                pass
+                    # Fetch split/bonus history
+                    splits = ticker.splits
+                    if splits is not None and not splits.empty:
+                        market_data[sym]['Splits'] = splits
+                except Exception:
+                    pass
 
     except Exception as e:
         print(f"Error fetching data from Yahoo Finance: {e}")
@@ -229,7 +231,7 @@ def fetch_benchmark_returns(start_date_str: str, custom_benchmarks: list = None)
         
         # Start a bit earlier to ensure we catch the start date or closest trading day
         fetch_start = start_dt - pd.Timedelta(days=5)
-        data = yf.download(tickers, start=fetch_start, progress=False)
+        data = yf.download(tickers, start=fetch_start, progress=False, threads=False)
         
         if 'Close' not in data:
             return results

@@ -38,8 +38,9 @@ class TestSatelliteColors(unittest.TestCase):
         ws_watchlist = wb.create_sheet(title="Satellite_Watchlist")
         ws_watchlist.append(["Date", "Stock", "Color"])
         ws_watchlist.append(["15-05-2026", "APOLLO", "Blue"])       # Older entry
+        ws_watchlist.append(["15-05-2026", "GAEL", "Green"])        # Past date only, should be cleared under new rule
         ws_watchlist.append(["16-05-2026", "APOLLO", "Orange"])     # Newest entry (should win)
-        ws_watchlist.append(["16-05-2026", "ASTRAMICRO", "Green"])  # Only entry
+        ws_watchlist.append(["16-05-2026", "ASTRAMICRO", "Green"])  # Only entry on latest date
 
         wb.save(self.test_filename)
         wb.close()
@@ -95,11 +96,11 @@ class TestSatelliteColors(unittest.TestCase):
         # Font is default (not bold)
         self.assertFalse(acutaas_cell.font.bold)
 
-        # GAEL (Row 5, Column 1 - Satellite, not in watchlist)
+        # GAEL (Row 5, Column 1 - Satellite, only in older date watchlist)
         gael_cell = ws.cell(row=5, column=1)
         self.assertEqual(gael_cell.value, "GAEL")
         self.assertTrue(gael_cell.fill is None or gael_cell.fill.fill_type is None)
-        self.assertTrue(gael_cell.font.bold)  # Font is bold dark red when missing from watchlist
+        self.assertFalse(gael_cell.font.bold)  # Reset to non-bold because it's not in the latest date's watchlist
 
         wb.close()
 

@@ -176,6 +176,27 @@ if __name__ == "__main__":
             print("\nTests complete. Run without --test to process trades.")
             sys.exit(0)
 
+    if '--recommend' in sys.argv:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        output_path = os.path.join(current_dir, 'Transformed_Tradebook.xlsx')
+        from src.actions import execute_recommendation_bypass
+
+        # Parse filter
+        idx = sys.argv.index('--recommend')
+        rec_filter = 'all'
+        if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith('-'):
+            rec_filter = sys.argv[idx + 1].strip().lower()
+            if rec_filter not in ['all', 'add', 'buy', 'sell']:
+                print(f"⚠️ Invalid recommendation filter '{rec_filter}'. Defaulting to 'all'.")
+                rec_filter = 'all'
+
+        try:
+            execute_recommendation_bypass(output_path, rec_filter=rec_filter)
+        except Exception as e:
+            print(f"❌ Error running recommendations: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
     if '--update' in sys.argv:
         main(update_only=True)
     elif '--watch' in sys.argv:

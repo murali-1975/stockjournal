@@ -157,24 +157,60 @@ def save_workbook(
     # Convert portfolios to dynamic Excel formulas for writing
     portfolio_write_df, overall_write_df = _convert_portfolios_to_formulas(portfolio_df, overall_df, output_file)
     
-    # Determine if we should use the hybrid xlwings approach to preserve Excel STOCKS rich data types
-    use_xlwings = False
+    # 1. Parse latest core watchlist trends and load satellite watchlist strictly from output_file
+    latest_core_trends = {}
+    watchlist_df = None
     has_watchlist = False
     if os.path.exists(output_file):
         try:
             import openpyxl as op
             wb_test = op.load_workbook(output_file, read_only=True)
+            has_core_sheet = any(name in wb_test.sheetnames for name in ['Core_Watchlist', 'Core_Portfolio'])
             has_watchlist = 'Satellite_Watchlist' in wb_test.sheetnames
             wb_test.close()
-        except Exception:
-            pass
+            
+            if has_core_sheet:
+                # Find sheet name
+                sheet_name = None
+                for name in ['Core_Watchlist', 'Core_Portfolio']:
+                    if name in pd.ExcelFile(output_file).sheet_names:
+                        sheet_name = name
+                        break
+                if sheet_name:
+                    core_df = pd.read_excel(output_file, sheet_name=sheet_name)
+                    if 'Company' in core_df.columns and 'Trend Status' in core_df.columns:
+                        # Enforce strict latest month filtering
+                        if 'Month' in core_df.columns:
+                            core_df['Month'] = pd.to_datetime(core_df['Month'], errors='coerce')
+                            latest_month = core_df['Month'].max()
+                            core_df = core_df[core_df['Month'] == latest_month]
+                        
+                        core_df = core_df.dropna(subset=['Company', 'Trend Status'])
+                        core_df['Company'] = core_df['Company'].astype(str).str.strip().str.upper()
+                        core_df['Trend Status'] = core_df['Trend Status'].astype(str).str.strip()
+                        latest_core_trends = core_df.drop_duplicates(subset=['Company']).set_index('Company')['Trend Status'].to_dict()
+            
+            if has_watchlist:
+                watchlist_df = pd.read_excel(output_file, sheet_name='Satellite_Watchlist')
+        except Exception as e:
+            print(f"Note: Watchlists could not be loaded in save_workbook: {e}")
+    
+    # Determine if we should use the hybrid xlwings approach to preserve Excel STOCKS rich data types
+    use_xlwings = False
+    if os.path.exists(output_file):
 
-    if has_watchlist:
         try:
             import xlwings as xw
             use_xlwings = True
         except ImportError:
             print("xlwings is not installed. Falling back to openpyxl (which converts Excel Stocks types to plain text).")
+
+    # Disable xlwings under unit tests or when explicitly requested to prevent headless background hangs
+    import sys
+    is_testing = 'unittest' in sys.modules
+    no_xlwings_flag = '--no-xlwings' in sys.argv or os.environ.get('NO_XLWINGS') == '1'
+    if is_testing or no_xlwings_flag:
+        use_xlwings = False
 
     if use_xlwings:
         print("Using xlwings hybrid approach to preserve STOCKS data types and live formulas...")
@@ -243,61 +279,100 @@ def save_workbook(
                 # This reads color configurations from the original master file (which is intact)
                 _apply_satellite_watchlist_formatting(writer, portfolio_df, output_file)
 
+                # --- Apply custom color formatting for Core stocks based on Core_Watchlist ---
+                _apply_core_watchlist_formatting(writer, portfolio_df, latest_core_trends)
+
                 # --- Auto-fit columns and freeze panes for readability ---
                 for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
                     if sheet in writer.sheets:
                         _auto_fit_columns_and_freeze(writer, sheet)
 
                 # --- Create Dashboard with charts ---
-                watchlist_df = None
-                if has_watchlist:
-                    try:
-                        watchlist_df = pd.read_excel(output_file, sheet_name='Satellite_Watchlist')
-                    except Exception:
-                        pass
-                create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns, watchlist_df)
+                create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns, watchlist_df, latest_core_trends=latest_core_trends)
 
             # 2. Use xlwings to copy updated sheets and update watchlist columns in master workbook
             import xlwings as xw
             
-            # Start Excel in hidden mode (very clean and fast)
-            app = xw.App(visible=False)
+            # Start Excel in visible mode (much more stable under COM for STOCKS types)
+            app = xw.App(visible=True)
             app.display_alerts = False
             
             try:
                 # Open both workbooks
-                wb_master = app.books.open(os.path.abspath(output_file))
-                wb_temp = app.books.open(os.path.abspath(temp_file))
+                wb_master = app.books.open(os.path.abspath(output_file), update_links=False)
+                
+                # Safety Check: If the file is open in another Excel instance, Excel opens it as Read-Only.
+                # Saving to a Read-Only workbook will trigger a hidden "Save As" modal and hang execution.
+                if wb_master.api.ReadOnly:
+                    print(f"\nERROR: '{output_file}' is currently open in another Excel window.")
+                    print("Please close the Excel file on your desktop and run the script again.\n")
+                    wb_master.close()
+                    app.quit()
+                    return
+                
+                wb_temp = app.books.open(os.path.abspath(temp_file), update_links=False)
+                
+                # Get sheet names robustly to avoid COM "This object does not support enumeration" bug
+                temp_sheet_names = [wb_temp.sheets[i].name for i in range(len(wb_temp.sheets))]
+                master_sheet_names = [wb_master.sheets[i].name for i in range(len(wb_master.sheets))]
                 
                 # Copy sheet data for raw data/portfolios to preserve sheet order and formula references
                 for name in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
-                    if name in [s.name for s in wb_temp.sheets]:
-                        if name not in [s.name for s in wb_master.sheets]:
+                    if name in temp_sheet_names:
+                        if name not in master_sheet_names:
                             wb_master.sheets.add(name)
+                            master_sheet_names.append(name)
                         ws_temp = wb_temp.sheets[name]
                         ws_master = wb_master.sheets[name]
                         
-                        # Clear old contents and paste new cell values & formatting
-                        ws_master.clear()
-                        ws_temp.used_range.copy(ws_master.range('A1'))
+                        if name in ['Raw_Tradebook', 'Transaction']:
+                            ws_master.clear()
+                            ws_temp.used_range.copy(ws_master.range('A1'))
+                        else:
+                            # For Current_Portfolio and Overall_Portfolio, copy Column A's values
+                            # and Column B onwards directly, to preserve Excel STOCKS rich data types.
+                            last_row_temp = ws_temp.used_range.last_cell.row
+                            last_col_temp = ws_temp.used_range.last_cell.column
+                            last_row_master = ws_master.used_range.last_cell.row
+                            
+                            # Clear columns B onwards in master
+                            ws_master.range((1, 2), (max(last_row_master, last_row_temp) + 10, last_col_temp + 10)).clear()
+                            
+                            # Copy Column A values directly (bypasses clipboard, preserves STOCKS formatting)
+                            ws_master.range((1, 1), (last_row_temp, 1)).value = ws_temp.range((1, 1), (last_row_temp, 1)).value
+                            
+                            # Copy Column A formats (colors, fonts) to apply Watchlist colors without breaking STOCKS types
+                            ws_temp.range((1, 1), (last_row_temp, 1)).copy()
+                            ws_master.range((1, 1)).paste(paste='formats')
+                            
+                            # Copy Columns B onwards (direct copy bypasses system clipboard, OLE-safe)
+                            ws_temp.range((1, 2), (last_row_temp, last_col_temp)).copy(ws_master.range((1, 2)))
+                            
+                            # Clear extra rows in Column A
+                            if last_row_master > last_row_temp:
+                                ws_master.range((last_row_temp + 1, 1), (last_row_master, 1)).clear()
                 
                 # Dashboard has floating charts, so we delete and re-copy the entire sheet object
-                if 'Dashboard' in [s.name for s in wb_master.sheets]:
+                if 'Dashboard' in master_sheet_names:
                     wb_master.sheets['Dashboard'].delete()
-                if 'Dashboard' in [s.name for s in wb_temp.sheets]:
+                    master_sheet_names.remove('Dashboard')
+                if 'Dashboard' in temp_sheet_names:
                     wb_temp.sheets['Dashboard'].copy(before=wb_master.sheets[0])
                     wb_master.sheets['Dashboard'].name = 'Dashboard'
+                    master_sheet_names.insert(0, 'Dashboard')
                     
                 # Clean up corrupted external links caused by cross-workbook sheet copying
-                for ws in wb_master.sheets:
-                    try:
-                        # Find and replace all instances of the temporary workbook name in formulas
-                        ws.api.Cells.Replace(What="[temp_transformed.xlsx]", Replacement="", LookAt=2)
-                    except Exception:
-                        pass
+                # Restrict to generated sheets only to prevent destroying STOCKS data types in Watchlist sheets
+                for sheet_name in ['Dashboard', 'Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
+                    if sheet_name in master_sheet_names:
+                        try:
+                            # Find and replace all instances of the temporary workbook name in formulas
+                            wb_master.sheets[sheet_name].api.Cells.Replace(What="[temp_transformed.xlsx]", Replacement="", LookAt=2)
+                        except Exception:
+                            pass
                 
                 # 3. Update Satellite_Watchlist Columns G, H, I, J using xlwings
-                if 'Satellite_Watchlist' in [s.name for s in wb_master.sheets]:
+                if 'Satellite_Watchlist' in master_sheet_names:
                     ws_watchlist = wb_master.sheets['Satellite_Watchlist']
                     
                     # Ensure headers are set
@@ -306,12 +381,16 @@ def save_workbook(
                     ws_watchlist.range('I1').value = "EMA 11 (weekly)"
                     ws_watchlist.range('J1').value = "EMA 21 (weekly)"
                     
-                    # Read unique symbols from Column B (B2 to B<last_row>)
+                    # Read unique symbols from Column B (B2 to B<last_row>) in a single bulk COM call
                     last_row = ws_watchlist.range('B' + str(ws_watchlist.cells.last_cell.row)).end('up').row
                     if last_row >= 2:
+                        symbols_values = ws_watchlist.range((2, 2), (last_row, 2)).value
+                        if not isinstance(symbols_values, list):
+                            symbols_values = [symbols_values]
+                            
+                        # Extract unique symbols
                         symbols = []
-                        for r in range(2, last_row + 1):
-                            sym_val = ws_watchlist.range((r, 2)).value
+                        for sym_val in symbols_values:
                             if sym_val:
                                 sym_str = str(sym_val).strip().upper()
                                 if sym_str and sym_str not in symbols:
@@ -320,26 +399,32 @@ def save_workbook(
                         if symbols:
                             from src.market_api import fetch_market_data_from_yahoo
                             classifications = {sym: 'Satellite' for sym in symbols}
-                            market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
+                            market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications, fetch_info=False)
                             
-                            for r in range(2, last_row + 1):
-                                sym_val = ws_watchlist.range((r, 2)).value
+                            # Construct 2D list for bulk write to save COM roundtrips
+                            rows_to_write = []
+                            for sym_val in symbols_values:
                                 if sym_val:
                                     sym_str = str(sym_val).strip().upper()
                                     if sym_str in market_data:
                                         data = market_data[sym_str]
-                                        # Write Columns G, H, I, J
-                                        ws_watchlist.range((r, 7)).value = data.get('Prev_Week_Close', 0.0)
-                                        ws_watchlist.range((r, 8)).value = data.get('EMA9', 0.0)
-                                        ws_watchlist.range((r, 9)).value = data.get('EMA11', 0.0)
-                                        ws_watchlist.range((r, 10)).value = data.get('EMA21', 0.0)
-                                        
-                                        # Apply INR currency formatting (₹)
-                                        inr_excel_format = '[$₹-en-IN] #,##0.00'
-                                        ws_watchlist.range((r, 7)).number_format = inr_excel_format
-                                        ws_watchlist.range((r, 8)).number_format = inr_excel_format
-                                        ws_watchlist.range((r, 9)).number_format = inr_excel_format
-                                        ws_watchlist.range((r, 10)).number_format = inr_excel_format
+                                        rows_to_write.append([
+                                            data.get('Prev_Week_Close', 0.0),
+                                            data.get('EMA9', 0.0),
+                                            data.get('EMA11', 0.0),
+                                            data.get('EMA21', 0.0)
+                                        ])
+                                    else:
+                                        rows_to_write.append([0.0, 0.0, 0.0, 0.0])
+                                else:
+                                    rows_to_write.append([0.0, 0.0, 0.0, 0.0])
+                            
+                            # Bulk write Columns G, H, I, J in a single operation
+                            ws_watchlist.range((2, 7), (last_row, 10)).value = rows_to_write
+                            
+                            # Apply INR currency formatting (₹) to the entire range in bulk
+                            inr_excel_format = '[$₹-en-IN] #,##0.00'
+                            ws_watchlist.range((2, 7), (last_row, 10)).number_format = inr_excel_format
                                         
                     # Auto-fit watchlist columns
                     ws_watchlist.autofit()
@@ -360,7 +445,10 @@ def save_workbook(
                     pass
             return
         except Exception as e:
-            print(f"Failed using xlwings hybrid approach: {e}. Falling back to standard openpyxl...")
+            print(f"\nWARNING: FAILED USING XLWINGS HYBRID APPROACH: {e}")
+            print("WARNING: FALLING BACK TO STANDARD OPENPYXL...")
+            print("WARNING: openpyxl will strip native Excel STOCKS data types from all sheets (including Watchlists).")
+            print("WARNING: To preserve STOCKS formats, close the Excel file before running main.py!\n")
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)
@@ -424,17 +512,26 @@ def save_workbook(
             # --- Apply custom color formatting for Satellite stocks based on Satellite_Watchlist ---
             _apply_satellite_watchlist_formatting(writer, portfolio_df, output_file)
 
+            # --- Apply custom color formatting for Core stocks based on Core_Watchlist ---
+            _apply_core_watchlist_formatting(writer, portfolio_df, latest_core_trends)
+
             # --- Update columns and dynamic conditional formatting for Satellite_Watchlist ---
+            print("Updating Satellite_Watchlist columns...")
             _update_satellite_watchlist_columns(writer, output_file)
+            print("Applying Satellite_Watchlist formatting...")
             _apply_satellite_watchlist_conditional_formatting(writer)
 
             # --- Auto-fit columns and freeze panes for readability ---
+            print("Auto-fitting columns...")
             for sheet in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio', 'Satellite_Watchlist']:
                 if sheet in writer.sheets or sheet in writer.book.sheetnames:
                     _auto_fit_columns_and_freeze(writer, sheet)
 
             # --- Create Dashboard with charts ---
-            create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns)
+            print("Creating Dashboard...")
+            create_dashboard(writer.book, portfolio_df, overall_df, df, benchmark_returns, watchlist_df, latest_core_trends=latest_core_trends)
+            
+            print("Saving Excel file (this might take a moment)...")
 
         print("Done!")
     except PermissionError:
@@ -634,8 +731,8 @@ def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file:
     """
     Reads the Satellite_Watchlist sheet from the existing workbook and styles
     the Symbol cell in the Current_Portfolio sheet for any matching 'Satellite'
-    stocks with their corresponding watchlist color.
-    Always uses the latest color entry if multiple exist for a stock.
+    stocks with their corresponding watchlist color on the latest watchlist date.
+    Clears background fill and resets font for stocks not in the latest date's watchlist.
     """
     import os
     import pandas as pd
@@ -664,15 +761,21 @@ def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file:
     try:
         # Filter out empty entries and sanitize dates
         watchlist_df = watchlist_df.dropna(subset=['Stock', 'Color'])
-        watchlist_df['Stock'] = watchlist_df['Stock'].astype(str).str.strip()
+        watchlist_df['Stock'] = watchlist_df['Stock'].astype(str).str.strip().str.upper()
         watchlist_df['Color'] = watchlist_df['Color'].astype(str).str.strip().str.upper()
         
         # Sort chronologically by Date (newest first) to find the latest
         watchlist_df['Date'] = pd.to_datetime(watchlist_df['Date'], dayfirst=True, errors='coerce')
-        watchlist_df = watchlist_df.sort_values(by='Date', ascending=False)
+        watchlist_df = watchlist_df.dropna(subset=['Date'])
         
-        # Deduplicate to keep only the latest color code per stock symbol
-        latest_colors = watchlist_df.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
+        # Enforce strict latest date filtering
+        latest_colors = {}
+        if not watchlist_df.empty:
+            latest_date = watchlist_df['Date'].max()
+            watchlist_df = watchlist_df[watchlist_df['Date'] == latest_date]
+            
+            # Deduplicate to keep only the latest color code per stock symbol on the latest date
+            latest_colors = watchlist_df.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
     except Exception as e:
         print(f"Error parsing Satellite_Watchlist data: {e}")
         return
@@ -694,7 +797,7 @@ def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file:
         class_val = str(worksheet.cell(row=row, column=class_idx).value).strip()
         if class_val == 'Satellite':
             symbol_cell = worksheet.cell(row=row, column=symbol_idx)
-            symbol = str(symbol_cell.value).strip()
+            symbol = str(symbol_cell.value).strip().upper()
             
             if symbol in latest_colors:
                 color_name = latest_colors[symbol]
@@ -704,9 +807,62 @@ def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file:
                     
                     symbol_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
                     symbol_cell.font = Font(color=font_color, bold=True)
+                else:
+                    symbol_cell.fill = PatternFill(fill_type=None)
+                    symbol_cell.font = Font(color='000000', bold=False)
             else:
-                # Stock not in Satellite_Watchlist: Highlight in Dark Red
-                symbol_cell.font = Font(color='8B0000', bold=True)
+                # Stock not in the latest date's watchlist: Clear fill and restore standard style
+                symbol_cell.fill = PatternFill(fill_type=None)
+                symbol_cell.font = Font(color='000000', bold=False)
+
+
+def _apply_core_watchlist_formatting(writer, df: pd.DataFrame, latest_core_trends: dict) -> None:
+    """
+    Reads the Core_Watchlist sheet from the existing workbook and styles
+    the Symbol cell in the Current_Portfolio sheet for any matching 'Core'
+    stocks with their corresponding watchlist color.
+    """
+    if 'Current_Portfolio' not in writer.sheets:
+        return
+        
+    worksheet = writer.sheets['Current_Portfolio']
+    col_map = {col_name: col_idx for col_idx, col_name in enumerate(df.columns, 1)}
+
+    if 'Symbol' not in col_map or 'TF_Classification' not in col_map:
+        return
+
+    symbol_idx = col_map['Symbol']
+    class_idx = col_map['TF_Classification']
+
+    from openpyxl.styles import PatternFill, Font
+    
+    COLOR_MAP = {
+        'Strong Trend- Green': '00B050',
+        'Medium Trend':        'FFC000',
+        'Weak Trend- Red':    'DC3939',
+        'Core-Weekly':         'B1A0C7'
+    }
+
+    # Apply styling row-by-row
+    for row in range(2, len(df) + 2):
+        class_val = str(worksheet.cell(row=row, column=class_idx).value).strip()
+        if class_val == 'Core':
+            symbol_cell = worksheet.cell(row=row, column=symbol_idx)
+            symbol = str(symbol_cell.value).strip().upper()
+            
+            if symbol in latest_core_trends:
+                trend = latest_core_trends[symbol]
+                if trend in COLOR_MAP:
+                    bg_color = COLOR_MAP[trend]
+                    symbol_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    # Make font bold and black for high readability on these backgrounds
+                    symbol_cell.font = Font(color='000000', bold=True)
+                else:
+                    symbol_cell.fill = PatternFill(fill_type=None)
+                    symbol_cell.font = Font(color='000000', bold=False)
+            else:
+                symbol_cell.fill = PatternFill(fill_type=None)
+                symbol_cell.font = Font(color='000000', bold=False)
 
 
 def _update_satellite_watchlist_columns(writer, output_file) -> None:
@@ -745,7 +901,7 @@ def _update_satellite_watchlist_columns(writer, output_file) -> None:
     classifications = {sym: 'Satellite' for sym in symbols}
     
     # Fetch market data
-    market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
+    market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications, fetch_info=False)
     
     # Formatting for currency columns
     inr_format = '[$₹-en-IN] #,##0.00'

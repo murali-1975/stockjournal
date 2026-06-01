@@ -48,30 +48,66 @@ COLOR_MAP = {
     'PURPLE': {'bg': 'E1D5E7', 'font': '60497A'}
 }
 
-def _get_satellite_style(symbol: str, classification: str, latest_colors: dict) -> tuple:
+def _extract_portfolio_styles(wb) -> dict:
     """
-    Returns (font, fill) for a given symbol if it is a Satellite stock
-    and has a color mapping. Otherwise returns (LABEL_FONT, None).
-    'classification' can be 'Satellite' or 'Cheat X'.
+    Extracts the exact font and fill styles applied to the 'Symbol' column in 'Current_Portfolio'.
     """
-    is_satellite = False
-    if isinstance(classification, str):
-        c = classification.lower()
-        if 'satellite' in c or 'cheat' in c:
-            is_satellite = True
-            
-    if not is_satellite:
-        return LABEL_FONT, None
-        
-    color_name = latest_colors.get(symbol, '')
-    if color_name in COLOR_MAP:
-        bg_color = COLOR_MAP[color_name]['bg']
-        font_color = COLOR_MAP[color_name]['font']
-        fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
-        font = Font(color=font_color, bold=True)
-        return font, fill
-        
-    return Font(color='8B0000', bold=True), None  # Default dark red if missing
+    portfolio_styles = {}
+    if 'Current_Portfolio' in wb.sheetnames:
+        ws = wb['Current_Portfolio']
+        symbol_col = -1
+        for col_idx in range(1, ws.max_column + 1):
+            if str(ws.cell(row=1, column=col_idx).value).strip().upper() == 'SYMBOL':
+                symbol_col = col_idx
+                break
+                
+        if symbol_col > 0:
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row_idx, column=symbol_col)
+                symbol = str(cell.value).strip().upper()
+                if symbol:
+                    # Manually build new Font and PatternFill objects to completely avoid openpyxl StyleProxy reference chains
+                    f = cell.font
+                    new_font = None
+                    if f:
+                        new_font = Font(
+                            name=f.name,
+                            size=f.size,
+                            bold=f.bold,
+                            italic=f.italic,
+                            charset=f.charset,
+                            color=f.color,
+                            underline=f.underline,
+                            strike=f.strike,
+                            vertAlign=f.vertAlign,
+                            scheme=f.scheme
+                        )
+                    
+                    fill = cell.fill
+                    new_fill = None
+                    if fill and getattr(fill, 'fill_type', None) is not None:
+                        new_fill = PatternFill(
+                            fill_type=fill.fill_type,
+                            start_color=fill.start_color,
+                            end_color=fill.end_color
+                        )
+                    
+                    portfolio_styles[symbol] = {
+                        'font': new_font,
+                        'fill': new_fill
+                    }
+    return portfolio_styles
+
+def _get_portfolio_style(symbol: str, portfolio_styles: dict) -> tuple:
+    """
+    Returns (font, fill) for a given symbol by looking it up in portfolio_styles.
+    If not found or no custom fill, returns (LABEL_FONT, None).
+    """
+    if symbol in portfolio_styles:
+        st = portfolio_styles[symbol]
+        if st['fill'] and getattr(st['fill'], 'fill_type', None):
+            return st['font'], st['fill']
+    return LABEL_FONT, None
 
 def _find_price_update_columns_from_workbook(wb) -> tuple:
     """
@@ -103,7 +139,7 @@ def _find_price_update_columns_from_workbook(wb) -> tuple:
         return None, None
 
 
-def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, raw_df: pd.DataFrame = None, benchmark_returns: dict = None, watchlist_df: pd.DataFrame = None) -> None:
+def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, raw_df: pd.DataFrame = None, benchmark_returns: dict = None, watchlist_df: pd.DataFrame = None, latest_core_trends: dict = None) -> None:
     """
     Creates (or replaces) a 'Dashboard' sheet with pre-computed summary tables.
 
@@ -163,31 +199,38 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     if watchlist_df is not None and not watchlist_df.empty:
         try:
             wdf = watchlist_df.dropna(subset=['Stock', 'Color']).copy()
-            wdf['Stock'] = wdf['Stock'].astype(str).str.strip()
+            wdf['Stock'] = wdf['Stock'].astype(str).str.strip().str.upper()
             wdf['Color'] = wdf['Color'].astype(str).str.strip().str.upper()
             wdf['Date'] = pd.to_datetime(wdf['Date'], dayfirst=True, errors='coerce')
-            wdf = wdf.sort_values(by='Date', ascending=False)
-            latest_colors = wdf.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
+            wdf = wdf.dropna(subset=['Date'])
+            if not wdf.empty:
+                latest_date = wdf['Date'].max()
+                wdf = wdf[wdf['Date'] == latest_date]
+                latest_colors = wdf.drop_duplicates(subset=['Stock']).set_index('Stock')['Color'].to_dict()
         except Exception:
             pass
+
+    latest_core_trends = latest_core_trends or {}
 
     # ══════════════════════════════════════════════════════════════════
     #  LEFT SIDE (Columns A-F) — KPIs, Gainers/Losers, Risk Table
     # ══════════════════════════════════════════════════════════════════
 
+    portfolio_styles = _extract_portfolio_styles(wb)
+
     row = 3
     _write_performance_kpis(ws, row, col_start=4)
     row = _write_kpi_table(ws, portfolio_df, overall_df, row)
     row += 2
-    row = _write_top_bottom_table(ws, portfolio_df, latest_colors, row, classification_filter='Satellite')
+    row = _write_top_bottom_table(ws, portfolio_df, portfolio_styles, row, classification_filter='Satellite')
     row += 2
-    row = _write_top_bottom_table(ws, portfolio_df, latest_colors, row, classification_filter='Core')
+    row = _write_top_bottom_table(ws, portfolio_df, portfolio_styles, row, classification_filter='Core')
     row += 2
-    row = _write_nearest_sl_table(ws, portfolio_df, latest_colors, row)
+    row = _write_nearest_sl_table(ws, portfolio_df, portfolio_styles, row)
     row += 2
-    row = _write_corporate_actions(ws, portfolio_df, overall_df, latest_colors, row)
+    row = _write_corporate_actions(ws, portfolio_df, overall_df, portfolio_styles, row)
     row += 2
-    row = _write_top_cheats_table(ws, portfolio_df, latest_colors, row)
+    row = _write_top_cheats_table(ws, portfolio_df, portfolio_styles, row)
 
     # ══════════════════════════════════════════════════════════════════
     #  RIGHT SIDE (Columns H-K) — Allocation & Distribution tables
@@ -212,7 +255,7 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     rrow += 2
     rrow = _write_holding_distribution(ws, portfolio_df, rrow)
     rrow += 2
-    rrow = _write_portfolio_movers_table(ws, portfolio_df, watchlist_df, latest_colors, rrow)
+    rrow = _write_portfolio_movers_table(ws, portfolio_df, watchlist_df, portfolio_styles, rrow)
     rrow += 2
     rrow = _write_watchlist_movers_table(ws, watchlist_df, portfolio_df, latest_colors, rrow)
     rrow += 2
@@ -339,7 +382,7 @@ def _write_performance_kpis(ws, start_row, col_start):
 #  Table 2: Top 5 Gainers / Bottom 5 Losers
 # ═══════════════════════════════════════════════════════════════════
 
-def _write_top_bottom_table(ws, df, latest_colors, row, classification_filter='Satellite'):
+def _write_top_bottom_table(ws, df, portfolio_styles, row, classification_filter='Satellite'):
     title = f'Top 5 Gainers / Bottom 5 Losers ({classification_filter})'
     row = _section_title(ws, row, 1, title)
     row = _styled_header(ws, row, 1, ['Symbol', 'Classification', 'Invested (₹)', 'Current (₹)', 'PnL (₹)', 'PnL %'])
@@ -368,7 +411,7 @@ def _write_top_bottom_table(ws, df, latest_colors, row, classification_filter='S
     for _, s in combined.iterrows():
         symbol = s.get('Symbol', '')
         classification = s.get('TF_Classification', '')
-        font, fill = _get_satellite_style(symbol, classification, latest_colors)
+        font, fill = _get_portfolio_style(symbol, portfolio_styles)
         
         c = _data_cell(ws, row, 1, symbol, font=font)
         if fill: c.fill = fill
@@ -392,7 +435,7 @@ def _write_top_bottom_table(ws, df, latest_colors, row, classification_filter='S
 #  Table 3: Stocks Nearest to Stop Loss
 # ═══════════════════════════════════════════════════════════════════
 
-def _write_nearest_sl_table(ws, df, latest_colors, row):
+def _write_nearest_sl_table(ws, df, portfolio_styles, row):
     """Writes stocks closest to SL. Returns next free row."""
     row = _section_title(ws, row, 1, '⚠️ Stocks Nearest to Stop Loss')
     row = _styled_header(ws, row, 1, ['Symbol', 'Classification', 'LTP', 'SL', 'Diff (₹)', 'Diff (%)', 'Tranche'])
@@ -412,7 +455,7 @@ def _write_nearest_sl_table(ws, df, latest_colors, row):
     for _, s in nearest.iterrows():
         symbol = s.get('Symbol', '')
         classification = s.get('TF_Classification', '')
-        font, fill = _get_satellite_style(symbol, classification, latest_colors)
+        font, fill = _get_portfolio_style(symbol, portfolio_styles)
         
         c = _data_cell(ws, row, 1, symbol, font=font)
         if fill: c.fill = fill
@@ -724,7 +767,7 @@ def _write_holding_distribution(ws, df, row):
 #  Table 10: Corporate Actions (LEFT SIDE)
 # ═══════════════════════════════════════════════════════════════════
 
-def _write_corporate_actions(ws, portfolio_df, overall_df, latest_colors, row):
+def _write_corporate_actions(ws, portfolio_df, overall_df, portfolio_styles, row):
     """Writes stocks with splits/bonuses since purchase. Returns next free row."""
     row = _section_title(ws, row, 1, '🔔 Corporate Actions (Splits / Bonus)')
     row = _styled_header(ws, row, 1, ['Symbol', 'Split / Bonus Details', 'Adj Required'])
@@ -745,7 +788,7 @@ def _write_corporate_actions(ws, portfolio_df, overall_df, latest_colors, row):
     for _, s in actions.iterrows():
         symbol = s.get('Symbol', '')
         classification = s.get('TF_Classification', '')
-        font, fill = _get_satellite_style(symbol, classification, latest_colors)
+        font, fill = _get_portfolio_style(symbol, portfolio_styles)
         
         c = _data_cell(ws, row, 1, symbol, font=font)
         if fill: c.fill = fill
@@ -763,7 +806,7 @@ def _write_corporate_actions(ws, portfolio_df, overall_df, latest_colors, row):
 #  Table 11: Top 5 Cheat Stocks (LEFT SIDE)
 # ═══════════════════════════════════════════════════════════════════
 
-def _write_top_cheats_table(ws, df, latest_colors, row):
+def _write_top_cheats_table(ws, df, portfolio_styles, row):
     """Writes Top 5 Cheat Stocks by holding period in descending order. Returns next free row."""
     row = _section_title(ws, row, 1, 'Top 5 Cheat Stocks by Holding Period')
     row = _styled_header(ws, row, 1, ['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value', 'Return %', 'XIRR'])
@@ -792,7 +835,7 @@ def _write_top_cheats_table(ws, df, latest_colors, row):
             
             if key == 'Symbol':
                 classification = s.get('TF_Classification', 'Satellite')
-                font, fill = _get_satellite_style(val, classification, latest_colors)
+                font, fill = _get_portfolio_style(val, portfolio_styles)
             
             # Apply dynamic color formatting for Return_Pct and XIRR
             if key in ['Return_Pct', 'XIRR']:
@@ -816,7 +859,7 @@ def _write_top_cheats_table(ws, df, latest_colors, row):
 #  Table 12: Top 10 Movers (Current Portfolio) & Table 13: Watchlist
 # ═══════════════════════════════════════════════════════════════════
 
-def _write_portfolio_movers_table(ws, df, watchlist_df, latest_colors, row):
+def _write_portfolio_movers_table(ws, df, watchlist_df, portfolio_styles, row):
     import pandas as pd
     row = _section_title(ws, row, 9, 'Top 10 Movers (Current Portfolio)')
     row = _styled_header(ws, row, 9, ['Symbol', 'Prev Week Close', 'LTP', '% Change'])
@@ -845,17 +888,8 @@ def _write_portfolio_movers_table(ws, df, watchlist_df, latest_colors, row):
     
     for _, s in top10.iterrows():
         symbol = s.get('Symbol', '')
-        font = LABEL_FONT
-        fill = None
-        
-        if symbol in latest_colors:
-            color_name = latest_colors[symbol]
-            if color_name in COLOR_MAP:
-                bg_color = COLOR_MAP[color_name]['bg']
-                font_color = COLOR_MAP[color_name]['font']
-                fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
-                font = Font(color=font_color, bold=True)
-        else:
+        font, fill = _get_portfolio_style(symbol, portfolio_styles)
+        if not fill:
             font = Font(color='8B0000', bold=True)
             
         c = _data_cell(ws, row, 9, symbol, font=font)

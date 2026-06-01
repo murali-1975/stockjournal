@@ -23,9 +23,15 @@ class TestSaveWorkbook(unittest.TestCase):
     """Test suite for the save_workbook function."""
 
     def setUp(self):
-        """Create sample DataFrames and a temporary output path."""
-        self.tmp_dir = tempfile.mkdtemp()
-        self.output_path = os.path.join(self.tmp_dir, 'test_output.xlsx')
+        """Create sample DataFrames and a local output path to prevent Excel Protected View."""
+        # Generate a unique local output filename based on the test name
+        test_name = self.id().split('.')[-1]
+        self.output_path = os.path.abspath(f'test_output_{test_name}.xlsx')
+        if os.path.exists(self.output_path):
+            try:
+                os.remove(self.output_path)
+            except Exception:
+                pass
 
         self.raw_df = pd.DataFrame({
             'Trade Date': ['2025-01-01'],
@@ -89,6 +95,14 @@ class TestSaveWorkbook(unittest.TestCase):
             'Total_PnL_Percentage': [0.04],
             'Holding_Period': [30],
         })
+
+    def tearDown(self):
+        """Clean up the test workbook."""
+        if os.path.exists(self.output_path):
+            try:
+                os.remove(self.output_path)
+            except Exception:
+                pass
 
     def test_sheets_created(self):
         """All four expected sheets should be created in the workbook."""
@@ -157,6 +171,108 @@ class TestSaveWorkbook(unittest.TestCase):
         wb = load_workbook(self.output_path)
         self.assertIn('My_Notes', wb.sheetnames)
         self.assertEqual(wb['My_Notes']['A1'].value, 'User custom data')
+        wb.close()
+
+    def test_core_watchlist_formatting(self):
+        """Core stocks in Current_Portfolio and Dashboard should be formatted based on Core_Watchlist latest month trends strictly."""
+        import os
+        from openpyxl import Workbook
+        
+        # Add TCS (Core) to portfolio_df to test that its background is cleared if it is only in the past month
+        tcs_row = pd.Series({
+            'Symbol': 'TCS',
+            'Cap': 'Large Cap',
+            'TF_Sector': 'Technology',
+            'TF_Classification': 'Core',
+            'Latest_Tranche': 'Tranch 1',
+            'Current_Quantity': 10,
+            'Average_Buy_Price': 3000.0,
+            'SL': 2700.0,
+            'Invested_Value': 30000.0,
+            'LTP': 3100.0,
+            'EMA9': 3090.0,
+            'EMA10': 3085.0,
+            'EMA11': 3080.0,
+            'EMA21': 3050.0,
+            'Current_Value': 31000.0,
+            'Unrealized_PnL': 1000.0,
+            'Holding_Period': 30,
+        })
+        portfolio_test_df = pd.concat([self.portfolio_df, pd.DataFrame([tcs_row])], ignore_index=True)
+        
+        # Create empty workbook with Core_Watchlist manually containing multiple months
+        wb = Workbook()
+        default_sheet = wb.active
+        wb.remove(default_sheet)
+        
+        ws_cw = wb.create_sheet('Core_Watchlist')
+        ws_cw.append(['Month', 'Company', 'Company Name', 'Sector', 'Theme', 'Market Cap (MC)', 'Trend Status'])
+        # RELIANCE is in the latest month
+        ws_cw.append(['2026-05-01', 'RELIANCE', 'Reliance Industries', 'Energy', 'Industrial', 'Large Cap', 'Strong Trend- Green'])
+        # TCS is only in a past month (should be filtered out/not colored)
+        ws_cw.append(['2026-04-01', 'TCS', 'Tata Consultancy Services', 'Technology', 'Industrial', 'Large Cap', 'Medium Trend'])
+        wb.save(self.output_path)
+        wb.close()
+        
+        # Run save_workbook which appends/overwrites data sheets and builds Dashboard
+        save_workbook(self.raw_df, self.grouped_df, portfolio_test_df, self.overall_df, self.output_path)
+        
+        # 1. Read back and verify styling on 'Current_Portfolio' sheet
+        wb = load_workbook(self.output_path)
+        ws_cp = wb['Current_Portfolio']
+        
+        header = [cell.value for cell in ws_cp[1]]
+        symbol_col_idx = header.index('Symbol') + 1
+        
+        # Find row for RELIANCE and TCS in Current_Portfolio
+        reliance_row, tcs_row_idx = None, None
+        for r in range(2, ws_cp.max_row + 1):
+            val = ws_cp.cell(row=r, column=symbol_col_idx).value
+            if val == 'RELIANCE':
+                reliance_row = r
+            elif val == 'TCS':
+                tcs_row_idx = r
+                
+        self.assertIsNotNone(reliance_row)
+        self.assertIsNotNone(tcs_row_idx)
+        
+        reliance_cell = ws_cp.cell(row=reliance_row, column=symbol_col_idx)
+        tcs_cell = ws_cp.cell(row=tcs_row_idx, column=symbol_col_idx)
+        
+        # RELIANCE should be green
+        self.assertIn(reliance_cell.fill.start_color.rgb, ['0000B050', 'FF00B050'])
+        self.assertTrue(reliance_cell.font.bold)
+        
+        # TCS should be cleared (no background fill)
+        self.assertIn(tcs_cell.fill.fill_type, [None, 'none'])
+        self.assertFalse(tcs_cell.font.bold)
+        
+        # 2. Read back and verify styling on 'Dashboard' sheet
+        self.assertIn('Dashboard', wb.sheetnames)
+        ws_db = wb['Dashboard']
+        
+        # Scan Dashboard sheet columns for RELIANCE and TCS
+        reliance_db_cell, tcs_db_cell = None, None
+        for r in range(1, ws_db.max_row + 1):
+            for c in range(1, ws_db.max_column + 1):
+                cell_val = ws_db.cell(row=r, column=c).value
+                if cell_val == 'RELIANCE':
+                    reliance_db_cell = ws_db.cell(row=r, column=c)
+                elif cell_val == 'TCS':
+                    tcs_db_cell = ws_db.cell(row=r, column=c)
+                    
+        self.assertIsNotNone(reliance_db_cell)
+        self.assertIsNotNone(tcs_db_cell)
+        
+        # RELIANCE cell in Dashboard must be colored green
+        self.assertIn(reliance_db_cell.fill.start_color.rgb, ['0000B050', 'FF00B050'])
+        self.assertTrue(reliance_db_cell.font.bold)
+        self.assertEqual(reliance_db_cell.font.color.rgb, '00000000')
+        
+        # TCS cell in Dashboard must have cleared background
+        self.assertIn(tcs_db_cell.fill.fill_type, [None, 'none'])
+        self.assertTrue(tcs_db_cell.font.bold)
+        
         wb.close()
 
 
