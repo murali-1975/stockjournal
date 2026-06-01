@@ -9,6 +9,7 @@ A powerful Python-based trading journal and portfolio management system designed
 - **Live Market Data Integration**: Fetches real-time Last Traded Price (LTP) and Exponential Moving Averages (EMA 9, 10, 11, 21) dynamically from Yahoo Finance.
 - **Benchmark Returns Tracking**: Extracts an `INVEST_START_DATE` and calculates comparative returns against customizable indices like Nifty 50, Nifty Midcap, and Nifty Smallcap.
 - **Dynamic Stop-Loss Calculation**: Computes trailing and average-price based Stop Loss values dependent on the stock's current Tranche level.
+- **Action Recommendation Engine**: Evaluates active holdings and watchlist trends under portfolio rules to generate structured `BUY`, `ADD` (scale-in), or `SELL` (trim) recommendations. Results are cleanly logged into the **`Action Tracker`** sheet, allowing you to record your actual decisions and remarks.
 - **Smart Categorization**: Classifies stocks by Sector, Market Cap, and as "Core or Satellite" based on `.cfg` and reference Excel files automatically.
 - **Corporate Action Handling**: Automatically detects stock splits and bonuses (post-purchase) from Yahoo Finance, prompting the user to auto-adjust historical trade data directly.
 - **Excel Dashboard Generation**: Outputs deeply formatted, Excel-native dashboards including Allocation breakdowns (Sector, Market Cap, Core/Satellite), KPI Summaries, top gainers/losers, and PnL metrics.
@@ -106,7 +107,15 @@ To run the application, open your terminal in the project directory and execute 
 ```
 **What it does:** Authenticates once with your Telegram app, requesting an OTP, and generates a permanent `SESSION_STR` to be stored inside `scanner.py` or cloud environment variables.
 
-### 6. Run Test Suite
+### 6. Action Recommendation Engine
+```bash
+.\.venv\Scripts\python.exe main.py --recommend [filter]
+```
+*(Replace `[filter]` with `all`, `buy`, `add`, or `sell`)*
+
+**What it does:** Scans portfolio holdings and watchlist trends to identify candidate stocks for initiating (BUY), scaling-in (ADD), or trimming (SELL). It automatically appends and updates these entries in the **`Action Tracker`** sheet of `Transformed_Tradebook.xlsx` using xlwings to preserve the rich Excel `STOCKS` data types, and lets you input your actual `Action Taken` and `Remarks`.
+
+### 7. Run Test Suite
 ```bash
 .\.venv\Scripts\python.exe main.py --test
 ```
