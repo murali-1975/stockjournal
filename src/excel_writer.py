@@ -339,7 +339,7 @@ def save_workbook(
                             ws_master.range((1, 2), (max(last_row_master, last_row_temp) + 10, last_col_temp + 10)).clear()
                             
                             # Copy Column A values directly (bypasses clipboard, preserves STOCKS formatting)
-                            ws_master.range((1, 1), (last_row_temp, 1)).value = ws_temp.range((1, 1), (last_row_temp, 1)).value
+                            ws_master.range((1, 1), (last_row_temp, 1)).options(transpose=True).value = ws_temp.range((1, 1), (last_row_temp, 1)).value
                             
                             # Copy Column A formats (colors, fonts) to apply Watchlist colors without breaking STOCKS types
                             ws_temp.range((1, 1), (last_row_temp, 1)).copy()
