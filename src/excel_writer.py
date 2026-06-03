@@ -295,9 +295,14 @@ def save_workbook(
             # 2. Use xlwings to copy updated sheets and update watchlist columns in master workbook
             import xlwings as xw
             
-            # Start Excel in visible mode (much more stable under COM for STOCKS types)
-            app = xw.App(visible=True)
+            # Start Excel in invisible mode (much more stable and avoids focus/interaction deadlocks)
+            app = xw.App(visible=False, add_book=False)
             app.display_alerts = False
+            app.screen_updating = False
+            try:
+                app.interactive = False
+            except Exception:
+                pass
             
             import time
             retries = 3
@@ -438,6 +443,7 @@ def save_workbook(
                     # Save and close the master workbook
                     wb_master.save()
                     wb_master.close()
+                    wb_temp.saved = True
                     wb_temp.close()
                     print("Workbook saved successfully via xlwings (STOCKS data types preserved)!")
                     break
@@ -449,11 +455,15 @@ def save_workbook(
                     print(f"\nExcel was busy (COM call rejected: {e}). Retrying in 2 seconds... (Attempt {attempt+1}/{retries})")
                     try:
                         for book in list(app.books):
+                            book.saved = True
                             book.close()
                     except Exception:
                         pass
                     time.sleep(2)
             try:
+                for book in list(app.books):
+                    book.saved = True
+                    book.close()
                 app.quit()
             except Exception:
                 pass
@@ -468,6 +478,9 @@ def save_workbook(
         except PermissionError as pe:
             print(f"\nERROR: Excel file lock detected. Exiting process to avoid corruption: {pe}\n")
             try:
+                for book in list(app.books):
+                    book.saved = True
+                    book.close()
                 app.quit()
             except Exception:
                 pass
@@ -480,6 +493,9 @@ def save_workbook(
             sys.exit(1)
         except Exception as e:
             try:
+                for book in list(app.books):
+                    book.saved = True
+                    book.close()
                 app.quit()
             except Exception:
                 pass
