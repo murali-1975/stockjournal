@@ -307,8 +307,7 @@ def save_workbook(
                     print(f"\nERROR: '{output_file}' is currently open in another Excel window.")
                     print("Please close the Excel file on your desktop and run the script again.\n")
                     wb_master.close()
-                    app.quit()
-                    return
+                    raise PermissionError(f"Workbook '{output_file}' is locked/open in another Excel window.")
                 
                 wb_temp = app.books.open(os.path.abspath(temp_file), update_links=False)
                 
@@ -435,7 +434,10 @@ def save_workbook(
                 wb_temp.close()
                 print("Workbook saved successfully via xlwings (STOCKS data types preserved)!")
             finally:
-                app.quit()
+                try:
+                    app.quit()
+                except Exception:
+                    pass
                 
             # Clean up the temporary file
             if os.path.exists(temp_file):
@@ -444,6 +446,15 @@ def save_workbook(
                 except Exception:
                     pass
             return
+        except PermissionError as pe:
+            print(f"\nERROR: Excel file lock detected. Exiting process to avoid corruption: {pe}\n")
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
+            import sys
+            sys.exit(1)
         except Exception as e:
             print(f"\nWARNING: FAILED USING XLWINGS HYBRID APPROACH: {e}")
             print("WARNING: FALLING BACK TO STANDARD OPENPYXL...")
