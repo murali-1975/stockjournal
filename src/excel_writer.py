@@ -169,29 +169,31 @@ def save_workbook(
             has_watchlist = 'Satellite_Watchlist' in wb_test.sheetnames
             wb_test.close()
             
-            if has_core_sheet:
-                # Find sheet name
-                sheet_name = None
-                for name in ['Core_Watchlist', 'Core_Portfolio']:
-                    if name in pd.ExcelFile(output_file).sheet_names:
-                        sheet_name = name
-                        break
-                if sheet_name:
-                    core_df = pd.read_excel(output_file, sheet_name=sheet_name)
-                    if 'Company' in core_df.columns and 'Trend Status' in core_df.columns:
-                        # Enforce strict latest month filtering
-                        if 'Month' in core_df.columns:
-                            core_df['Month'] = pd.to_datetime(core_df['Month'], errors='coerce')
-                            latest_month = core_df['Month'].max()
-                            core_df = core_df[core_df['Month'] == latest_month]
-                        
-                        core_df = core_df.dropna(subset=['Company', 'Trend Status'])
-                        core_df['Company'] = core_df['Company'].astype(str).str.strip().str.upper()
-                        core_df['Trend Status'] = core_df['Trend Status'].astype(str).str.strip()
-                        latest_core_trends = core_df.drop_duplicates(subset=['Company']).set_index('Company')['Trend Status'].to_dict()
-            
-            if has_watchlist:
-                watchlist_df = pd.read_excel(output_file, sheet_name='Satellite_Watchlist')
+            if has_core_sheet or has_watchlist:
+                with pd.ExcelFile(output_file) as xls:
+                    if has_core_sheet:
+                        # Find sheet name
+                        sheet_name = None
+                        for name in ['Core_Watchlist', 'Core_Portfolio']:
+                            if name in xls.sheet_names:
+                                sheet_name = name
+                                break
+                        if sheet_name:
+                            core_df = pd.read_excel(xls, sheet_name=sheet_name)
+                            if 'Company' in core_df.columns and 'Trend Status' in core_df.columns:
+                                # Enforce strict latest month filtering
+                                if 'Month' in core_df.columns:
+                                    core_df['Month'] = pd.to_datetime(core_df['Month'], errors='coerce')
+                                    latest_month = core_df['Month'].max()
+                                    core_df = core_df[core_df['Month'] == latest_month]
+                                
+                                core_df = core_df.dropna(subset=['Company', 'Trend Status'])
+                                core_df['Company'] = core_df['Company'].astype(str).str.strip().str.upper()
+                                core_df['Trend Status'] = core_df['Trend Status'].astype(str).str.strip()
+                                latest_core_trends = core_df.drop_duplicates(subset=['Company']).set_index('Company')['Trend Status'].to_dict()
+                    
+                    if has_watchlist:
+                        watchlist_df = pd.read_excel(xls, sheet_name='Satellite_Watchlist')
         except Exception as e:
             print(f"Note: Watchlists could not be loaded in save_workbook: {e}")
     
@@ -297,147 +299,164 @@ def save_workbook(
             app = xw.App(visible=True)
             app.display_alerts = False
             
-            try:
-                # Open both workbooks
-                wb_master = app.books.open(os.path.abspath(output_file), update_links=False)
-                
-                # Safety Check: If the file is open in another Excel instance, Excel opens it as Read-Only.
-                # Saving to a Read-Only workbook will trigger a hidden "Save As" modal and hang execution.
-                if wb_master.api.ReadOnly:
-                    print(f"\nERROR: '{output_file}' is currently open in another Excel window.")
-                    print("Please close the Excel file on your desktop and run the script again.\n")
-                    wb_master.close()
-                    raise PermissionError(f"Workbook '{output_file}' is locked/open in another Excel window.")
-                
-                wb_temp = app.books.open(os.path.abspath(temp_file), update_links=False)
-                
-                # Get sheet names robustly to avoid COM "This object does not support enumeration" bug
-                temp_sheet_names = [wb_temp.sheets[i].name for i in range(len(wb_temp.sheets))]
-                master_sheet_names = [wb_master.sheets[i].name for i in range(len(wb_master.sheets))]
-                
-                # Copy sheet data for raw data/portfolios to preserve sheet order and formula references
-                for name in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
-                    if name in temp_sheet_names:
-                        if name not in master_sheet_names:
-                            wb_master.sheets.add(name)
-                            master_sheet_names.append(name)
-                        ws_temp = wb_temp.sheets[name]
-                        ws_master = wb_master.sheets[name]
+            import time
+            retries = 3
+            for attempt in range(retries):
+                try:
+                    # Open both workbooks
+                    wb_master = app.books.open(os.path.abspath(output_file), update_links=False)
+                    
+                    # Safety Check: If the file is open in another Excel instance, Excel opens it as Read-Only.
+                    # Saving to a Read-Only workbook will trigger a hidden "Save As" modal and hang execution.
+                    if wb_master.api.ReadOnly:
+                        print(f"\nERROR: '{output_file}' is currently open in another Excel window.")
+                        print("Please close the Excel file on your desktop and run the script again.\n")
+                        wb_master.close()
+                        raise PermissionError(f"Workbook '{output_file}' is locked/open in another Excel window.")
+                    
+                    # Give Excel a brief moment to settle down (especially for STOCKS data queries)
+                    time.sleep(1)
+                    
+                    wb_temp = app.books.open(os.path.abspath(temp_file), update_links=False)
+                    
+                    # Get sheet names robustly to avoid COM "This object does not support enumeration" bug
+                    temp_sheet_names = [wb_temp.sheets[i].name for i in range(len(wb_temp.sheets))]
+                    master_sheet_names = [wb_master.sheets[i].name for i in range(len(wb_master.sheets))]
+                    
+                    # Copy sheet data for raw data/portfolios to preserve sheet order and formula references
+                    for name in ['Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
+                        if name in temp_sheet_names:
+                            if name not in master_sheet_names:
+                                wb_master.sheets.add(name)
+                                master_sheet_names.append(name)
+                            ws_temp = wb_temp.sheets[name]
+                            ws_master = wb_master.sheets[name]
+                            
+                            if name in ['Raw_Tradebook', 'Transaction']:
+                                ws_master.clear()
+                                ws_temp.used_range.copy(ws_master.range('A1'))
+                            else:
+                                # For Current_Portfolio and Overall_Portfolio, copy Column A's values
+                                # and Column B onwards directly, to preserve Excel STOCKS rich data types.
+                                last_row_temp = ws_temp.used_range.last_cell.row
+                                last_col_temp = ws_temp.used_range.last_cell.column
+                                last_row_master = ws_master.used_range.last_cell.row
+                                
+                                # Clear columns B onwards in master
+                                ws_master.range((1, 2), (max(last_row_master, last_row_temp) + 10, last_col_temp + 10)).clear()
+                                
+                                # Copy Column A values directly (bypasses clipboard, preserves STOCKS formatting)
+                                ws_master.range((1, 1), (last_row_temp, 1)).options(transpose=True).value = ws_temp.range((1, 1), (last_row_temp, 1)).value
+                                
+                                # Copy Column A formats (colors, fonts) to apply Watchlist colors without breaking STOCKS types
+                                ws_temp.range((1, 1), (last_row_temp, 1)).copy()
+                                ws_master.range((1, 1)).paste(paste='formats')
+                                
+                                # Copy Columns B onwards (direct copy bypasses system clipboard, OLE-safe)
+                                ws_temp.range((1, 2), (last_row_temp, last_col_temp)).copy(ws_master.range((1, 2)))
+                                
+                                # Clear extra rows in Column A
+                                if last_row_master > last_row_temp:
+                                    ws_master.range((last_row_temp + 1, 1), (last_row_master, 1)).clear()
+                    
+                    # Dashboard has floating charts, so we delete and re-copy the entire sheet object
+                    if 'Dashboard' in master_sheet_names:
+                        wb_master.sheets['Dashboard'].delete()
+                        master_sheet_names.remove('Dashboard')
+                    if 'Dashboard' in temp_sheet_names:
+                        wb_temp.sheets['Dashboard'].copy(before=wb_master.sheets[0])
+                        wb_master.sheets['Dashboard'].name = 'Dashboard'
+                        master_sheet_names.insert(0, 'Dashboard')
                         
-                        if name in ['Raw_Tradebook', 'Transaction']:
-                            ws_master.clear()
-                            ws_temp.used_range.copy(ws_master.range('A1'))
-                        else:
-                            # For Current_Portfolio and Overall_Portfolio, copy Column A's values
-                            # and Column B onwards directly, to preserve Excel STOCKS rich data types.
-                            last_row_temp = ws_temp.used_range.last_cell.row
-                            last_col_temp = ws_temp.used_range.last_cell.column
-                            last_row_master = ws_master.used_range.last_cell.row
-                            
-                            # Clear columns B onwards in master
-                            ws_master.range((1, 2), (max(last_row_master, last_row_temp) + 10, last_col_temp + 10)).clear()
-                            
-                            # Copy Column A values directly (bypasses clipboard, preserves STOCKS formatting)
-                            ws_master.range((1, 1), (last_row_temp, 1)).options(transpose=True).value = ws_temp.range((1, 1), (last_row_temp, 1)).value
-                            
-                            # Copy Column A formats (colors, fonts) to apply Watchlist colors without breaking STOCKS types
-                            ws_temp.range((1, 1), (last_row_temp, 1)).copy()
-                            ws_master.range((1, 1)).paste(paste='formats')
-                            
-                            # Copy Columns B onwards (direct copy bypasses system clipboard, OLE-safe)
-                            ws_temp.range((1, 2), (last_row_temp, last_col_temp)).copy(ws_master.range((1, 2)))
-                            
-                            # Clear extra rows in Column A
-                            if last_row_master > last_row_temp:
-                                ws_master.range((last_row_temp + 1, 1), (last_row_master, 1)).clear()
-                
-                # Dashboard has floating charts, so we delete and re-copy the entire sheet object
-                if 'Dashboard' in master_sheet_names:
-                    wb_master.sheets['Dashboard'].delete()
-                    master_sheet_names.remove('Dashboard')
-                if 'Dashboard' in temp_sheet_names:
-                    wb_temp.sheets['Dashboard'].copy(before=wb_master.sheets[0])
-                    wb_master.sheets['Dashboard'].name = 'Dashboard'
-                    master_sheet_names.insert(0, 'Dashboard')
+                    # Clean up corrupted external links caused by cross-workbook sheet copying
+                    for sheet_name in ['Dashboard', 'Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
+                        if sheet_name in master_sheet_names:
+                            try:
+                                # Find and replace all instances of the temporary workbook name in formulas
+                                wb_master.sheets[sheet_name].api.Cells.Replace(What="[temp_transformed.xlsx]", Replacement="", LookAt=2)
+                            except Exception:
+                                pass
                     
-                # Clean up corrupted external links caused by cross-workbook sheet copying
-                # Restrict to generated sheets only to prevent destroying STOCKS data types in Watchlist sheets
-                for sheet_name in ['Dashboard', 'Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
-                    if sheet_name in master_sheet_names:
-                        try:
-                            # Find and replace all instances of the temporary workbook name in formulas
-                            wb_master.sheets[sheet_name].api.Cells.Replace(What="[temp_transformed.xlsx]", Replacement="", LookAt=2)
-                        except Exception:
-                            pass
-                
-                # 3. Update Satellite_Watchlist Columns G, H, I, J using xlwings
-                if 'Satellite_Watchlist' in master_sheet_names:
-                    ws_watchlist = wb_master.sheets['Satellite_Watchlist']
-                    
-                    # Ensure headers are set
-                    ws_watchlist.range('G1').value = "Previous week Close"
-                    ws_watchlist.range('H1').value = "EMA 9 (weekly)"
-                    ws_watchlist.range('I1').value = "EMA 11 (weekly)"
-                    ws_watchlist.range('J1').value = "EMA 21 (weekly)"
-                    
-                    # Read unique symbols from Column B (B2 to B<last_row>) in a single bulk COM call
-                    last_row = ws_watchlist.range('B' + str(ws_watchlist.cells.last_cell.row)).end('up').row
-                    if last_row >= 2:
-                        symbols_values = ws_watchlist.range((2, 2), (last_row, 2)).value
-                        if not isinstance(symbols_values, list):
-                            symbols_values = [symbols_values]
-                            
-                        # Extract unique symbols
-                        symbols = []
-                        for sym_val in symbols_values:
-                            if sym_val:
-                                sym_str = str(sym_val).strip().upper()
-                                if sym_str and sym_str not in symbols:
-                                    symbols.append(sym_str)
-                                    
-                        if symbols:
-                            from src.market_api import fetch_market_data_from_yahoo
-                            classifications = {sym: 'Satellite' for sym in symbols}
-                            market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications, fetch_info=False)
-                            
-                            # Construct 2D list for bulk write to save COM roundtrips
-                            rows_to_write = []
+                    # 3. Update Satellite_Watchlist Columns G, H, I, J using xlwings
+                    if 'Satellite_Watchlist' in master_sheet_names:
+                        ws_watchlist = wb_master.sheets['Satellite_Watchlist']
+                        
+                        # Ensure headers are set
+                        ws_watchlist.range('G1').value = "Previous week Close"
+                        ws_watchlist.range('H1').value = "EMA 9 (weekly)"
+                        ws_watchlist.range('I1').value = "EMA 11 (weekly)"
+                        ws_watchlist.range('J1').value = "EMA 21 (weekly)"
+                        
+                        # Read unique symbols from Column B (B2 to B<last_row>) in a single bulk COM call
+                        last_row = ws_watchlist.range('B' + str(ws_watchlist.cells.last_cell.row)).end('up').row
+                        if last_row >= 2:
+                            symbols_values = ws_watchlist.range((2, 2), (last_row, 2)).value
+                            if not isinstance(symbols_values, list):
+                                symbols_values = [symbols_values]
+                                
+                            # Extract unique symbols
+                            symbols = []
                             for sym_val in symbols_values:
                                 if sym_val:
                                     sym_str = str(sym_val).strip().upper()
-                                    if sym_str in market_data:
-                                        data = market_data[sym_str]
-                                        rows_to_write.append([
-                                            data.get('Prev_Week_Close', 0.0),
-                                            data.get('EMA9', 0.0),
-                                            data.get('EMA11', 0.0),
-                                            data.get('EMA21', 0.0)
-                                        ])
+                                    if sym_str and sym_str not in symbols:
+                                        symbols.append(sym_str)
+                                        
+                            if symbols:
+                                from src.market_api import fetch_market_data_from_yahoo
+                                classifications = {sym: 'Satellite' for sym in symbols}
+                                market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications, fetch_info=False)
+                                
+                                # Construct 2D list for bulk write to save COM roundtrips
+                                rows_to_write = []
+                                for sym_val in symbols_values:
+                                    if sym_val:
+                                        sym_str = str(sym_val).strip().upper()
+                                        if sym_str in market_data:
+                                            data = market_data[sym_str]
+                                            rows_to_write.append([
+                                                data.get('Prev_Week_Close', 0.0),
+                                                data.get('EMA9', 0.0),
+                                                data.get('EMA11', 0.0),
+                                                data.get('EMA21', 0.0)
+                                            ])
+                                        else:
+                                            rows_to_write.append([0.0, 0.0, 0.0, 0.0])
                                     else:
                                         rows_to_write.append([0.0, 0.0, 0.0, 0.0])
-                                else:
-                                    rows_to_write.append([0.0, 0.0, 0.0, 0.0])
-                            
-                            # Bulk write Columns G, H, I, J in a single operation
-                            ws_watchlist.range((2, 7), (last_row, 10)).value = rows_to_write
-                            
-                            # Apply INR currency formatting (₹) to the entire range in bulk
-                            inr_excel_format = '[$₹-en-IN] #,##0.00'
-                            ws_watchlist.range((2, 7), (last_row, 10)).number_format = inr_excel_format
-                                        
-                    # Auto-fit watchlist columns
-                    ws_watchlist.autofit()
-                
-                # Save and close the master workbook
-                wb_master.save()
-                wb_master.close()
-                wb_temp.close()
-                print("Workbook saved successfully via xlwings (STOCKS data types preserved)!")
-            finally:
-                try:
-                    app.quit()
-                except Exception:
-                    pass
+                                
+                                # Bulk write Columns G, H, I, J in a single operation
+                                ws_watchlist.range((2, 7), (last_row, 10)).value = rows_to_write
+                                
+                                # Apply INR currency formatting (₹) to the entire range in bulk
+                                inr_excel_format = '[$₹-en-IN] #,##0.00'
+                                ws_watchlist.range((2, 7), (last_row, 10)).number_format = inr_excel_format
+                                            
+                        # Auto-fit watchlist columns
+                        ws_watchlist.autofit()
+                    
+                    # Save and close the master workbook
+                    wb_master.save()
+                    wb_master.close()
+                    wb_temp.close()
+                    print("Workbook saved successfully via xlwings (STOCKS data types preserved)!")
+                    break
+                except PermissionError:
+                    raise
+                except Exception as e:
+                    if attempt == retries - 1:
+                        raise
+                    print(f"\nExcel was busy (COM call rejected: {e}). Retrying in 2 seconds... (Attempt {attempt+1}/{retries})")
+                    try:
+                        for book in list(app.books):
+                            book.close()
+                    except Exception:
+                        pass
+                    time.sleep(2)
+            try:
+                app.quit()
+            except Exception:
+                pass
                 
             # Clean up the temporary file
             if os.path.exists(temp_file):
@@ -448,6 +467,10 @@ def save_workbook(
             return
         except PermissionError as pe:
             print(f"\nERROR: Excel file lock detected. Exiting process to avoid corruption: {pe}\n")
+            try:
+                app.quit()
+            except Exception:
+                pass
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)
@@ -456,6 +479,10 @@ def save_workbook(
             import sys
             sys.exit(1)
         except Exception as e:
+            try:
+                app.quit()
+            except Exception:
+                pass
             print(f"\nWARNING: FAILED USING XLWINGS HYBRID APPROACH: {e}")
             print("WARNING: FALLING BACK TO STANDARD OPENPYXL...")
             print("WARNING: openpyxl will strip native Excel STOCKS data types from all sheets (including Watchlists).")
@@ -764,7 +791,8 @@ def _apply_satellite_watchlist_formatting(writer, df: pd.DataFrame, output_file:
         return
 
     try:
-        watchlist_df = pd.read_excel(output_file, sheet_name='Satellite_Watchlist')
+        with pd.ExcelFile(output_file) as xls:
+            watchlist_df = pd.read_excel(xls, sheet_name='Satellite_Watchlist')
     except Exception as e:
         print(f"Note: Satellite_Watchlist sheet could not be loaded from existing workbook: {e}")
         return
