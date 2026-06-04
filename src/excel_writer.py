@@ -249,7 +249,7 @@ def save_workbook(
                 _apply_number_format(
                     writer, portfolio_df, 'Current_Portfolio',
                     columns=['Average_Buy_Price', 'SL', 'LTP_SL_Diff', 'Invested_Value', 'LTP',
-                             'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21',
+                             'Prev_Day_Close', 'Prev_Week_Close', 'Prev_Month_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21',
                              'Current_Value', 'Unrealized_PnL'],
                     number_format=inr_format
                 )
@@ -735,7 +735,7 @@ def _apply_ltp_comparison_formatting(writer, df: pd.DataFrame, sheet_name: str) 
     green_fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
     pink_fill = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
     
-    for target_col in ['Prev_Day_Close', 'Prev_Week_Close']:
+    for target_col in ['Prev_Day_Close', 'Prev_Week_Close', 'Prev_Month_Close']:
         if target_col in col_map:
             target_idx = col_map[target_col]
             target_letter = get_column_letter(target_idx)

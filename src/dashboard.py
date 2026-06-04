@@ -375,6 +375,39 @@ def _write_performance_kpis(ws, start_row, col_start):
         _data_cell(ws, row, col_start + 2, form_u, fmt=fmt)
         row += 1
 
+    # Leave a blank row
+    row += 1
+
+    # Sub-headers for Advancing / Declining
+    _data_cell(ws, row, col_start, ' ', font=LABEL_FONT)
+    c1 = _data_cell(ws, row, col_start + 1, 'Advancing', font=HEADER_FONT)
+    c1.alignment = Alignment(horizontal='center')
+    c2 = _data_cell(ws, row, col_start + 2, 'Declining', font=HEADER_FONT)
+    c2.alignment = Alignment(horizontal='center')
+    row += 1
+
+    # Advancing / Declining sub-metrics using dynamic SUMPRODUCT formulas
+    sub_metrics = [
+        ('Core (Previous month close)',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Core")*(Current_Portfolio!$M$2:$M$1000>Current_Portfolio!$AA$2:$AA$1000)*(Current_Portfolio!$M$2:$M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Core")*(Current_Portfolio!$M$2:$M$1000<=Current_Portfolio!$AA$2:$AA$1000)*(Current_Portfolio!$M$2:$M$1000>0))'),
+        ('Satellite (Previous week close)',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Satellite")*(Current_Portfolio!$M$2:$M$1000>Current_Portfolio!$O$2:$O$1000)*(Current_Portfolio!$M$2:$M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Satellite")*(Current_Portfolio!$M$2:$M$1000<=Current_Portfolio!$O$2:$O$1000)*(Current_Portfolio!$M$2:$M$1000>0))'),
+        ('Core (Previous Close)',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Core")*(Current_Portfolio!$M$2:$M$1000>Current_Portfolio!$N$2:$N$1000)*(Current_Portfolio!$M$2:$M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Core")*(Current_Portfolio!$M$2:$M$1000<=Current_Portfolio!$N$2:$N$1000)*(Current_Portfolio!$M$2:$M$1000>0))'),
+        ('Satellite (Previous Close)',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Satellite")*(Current_Portfolio!$M$2:$M$1000>Current_Portfolio!$N$2:$N$1000)*(Current_Portfolio!$M$2:$M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!$D$2:$D$1000="Satellite")*(Current_Portfolio!$M$2:$M$1000<=Current_Portfolio!$N$2:$N$1000)*(Current_Portfolio!$M$2:$M$1000>0))')
+    ]
+
+    for label, adv_form, dec_form in sub_metrics:
+        _data_cell(ws, row, col_start, label, font=LABEL_FONT)
+        _data_cell(ws, row, col_start + 1, adv_form, fmt='0')
+        _data_cell(ws, row, col_start + 2, dec_form, fmt='0')
+        row += 1
+
     return row
 
 

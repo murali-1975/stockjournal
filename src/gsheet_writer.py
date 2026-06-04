@@ -148,7 +148,7 @@ def _apply_sheet_styles(worksheet, df):
             rules = get_conditional_format_rules(worksheet)
             rules.clear()
             
-            for target_col in ['Prev_Day_Close', 'Prev_Week_Close']:
+            for target_col in ['Prev_Day_Close', 'Prev_Week_Close', 'Prev_Month_Close']:
                 if target_col in col_map:
                     target_idx = col_map[target_col]
                     target_letter = gspread.utils.rowcol_to_a1(1, target_idx).rstrip('0123456789')

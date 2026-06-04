@@ -111,7 +111,9 @@ def build_gsheet_dashboard(sh, portfolio_df, overall_df, benchmark_returns=None)
         formats.append({"range": "J2:M2", "format": cellFormat(textFormat=textFormat(italic=True, fontSize=10), horizontalAlignment='RIGHT')})
 
     # Left Side
+    # Left Side & Middle Section
     row = 3
+    _, formats = _write_performance_kpis_gsheet(grid, 3, formats)
     row, formats = _write_kpi_table(grid, portfolio_df, overall_df, row, formats)
     row += 2
     row, formats = _write_top_bottom_table(grid, portfolio_df, row, formats)
@@ -450,6 +452,67 @@ def _write_top_cheats_table(grid, df, r, formats):
             formats.append({"range": f'G{r+2+i}', "format": cellFormat(textFormat=textFormat(foregroundColor=GREEN_FG if xirr_val >= 0 else RED_FG))})
 
     return r + 2 + len(rows), formats
+
+
+def _write_performance_kpis_gsheet(grid, start_row, formats):
+    """Writes win/loss, risk/reward, and advancing/declining metrics side-by-side with KPIs."""
+    # 1. Section Title
+    _grid_write(grid, f'D{start_row}', [['Trading Performance']])
+    formats.append({"range": f'D{start_row}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
+    
+    # 2. Styled Header
+    _grid_write(grid, f'D{start_row+1}', [['Metric', 'Realized (Closed)', 'Unrealized (Open)']])
+    formats.append({"range": f'D{start_row+1}:F{start_row+1}', "format": _header_style()})
+    
+    r = start_row + 2
+    # 3. Main KPI formulas
+    # Note: Row references in formulas correspond to their row indices.
+    data = [
+        ['Winning Trades', '=COUNTIF(Overall_Portfolio!P$2:P$1000, ">0")', '=COUNTIF(Current_Portfolio!U$2:U$1000, ">0")'],
+        ['Losing Trades', '=COUNTIF(Overall_Portfolio!P$2:P$1000, "<0")', '=COUNTIF(Current_Portfolio!U$2:U$1000, "<0")'],
+        ['Win / Loss Ratio', f'=IF(E{r+1}>0, E{r}/E{r+1}, IF(E{r}>0, "No Loss", 0))', f'=IF(F{r+1}>0, F{r}/F{r+1}, IF(F{r}>0, "No Loss", 0))'],
+        ['Avg Win (₹)', f'=IF(E{r}>0, SUMIF(Overall_Portfolio!P$2:P$1000, ">0")/E{r}, 0)', f'=IF(F{r}>0, SUMIF(Current_Portfolio!U$2:U$1000, ">0")/F{r}, 0)'],
+        ['Avg Loss (₹)', f'=IF(E{r+1}>0, SUMIF(Overall_Portfolio!P$2:P$1000, "<0")/E{r+1}, 0)', f'=IF(F{r+1}>0, SUMIF(Current_Portfolio!U$2:U$1000, "<0")/F{r+1}, 0)'],
+        ['Risk / Reward Ratio', f'=IF(E{r+4}<0, ABS(E{r+3}/E{r+4}), 0)', f'=IF(F{r+4}<0, ABS(F{r+3}/F{r+4}), 0)']
+    ]
+    
+    _grid_write(grid, f'D{r}', data)
+    
+    # Formats for Main KPIs
+    formats.append({"range": f'E{r}:F{r+1}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern=NUM_FMT), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'E{r+2}:F{r+2}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern='0.00'), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'E{r+3}:F{r+4}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'E{r+5}:F{r+5}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern='0.00'), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'D{r}:F{r+5}', "format": cellFormat(borders=_thin_borders())})
+    
+    r = r + 6
+    r += 1 # blank spacer row
+    
+    # 4. Advancing / Declining Sub-headers
+    _grid_write(grid, f'D{r}', [[' ', 'Advancing', 'Declining']])
+    formats.append({"range": f'D{r}:F{r}', "format": _header_style()})
+    
+    # 5. Advancing / Declining counts using dynamic SUMPRODUCT formulas
+    sub_metrics = [
+        ['Core (Previous month close)',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Core")*(Current_Portfolio!M$2:M$1000>Current_Portfolio!AA$2:AA$1000)*(Current_Portfolio!M$2:M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Core")*(Current_Portfolio!M$2:M$1000<=Current_Portfolio!AA$2:AA$1000)*(Current_Portfolio!M$2:M$1000>0))'],
+        ['Satellite (Previous week close)',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Satellite")*(Current_Portfolio!M$2:M$1000>Current_Portfolio!O$2:O$1000)*(Current_Portfolio!M$2:M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Satellite")*(Current_Portfolio!M$2:M$1000<=Current_Portfolio!O$2:O$1000)*(Current_Portfolio!M$2:M$1000>0))'],
+        ['Core (Previous Close)',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Core")*(Current_Portfolio!M$2:M$1000>Current_Portfolio!N$2:N$1000)*(Current_Portfolio!M$2:M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Core")*(Current_Portfolio!M$2:M$1000<=Current_Portfolio!N$2:N$1000)*(Current_Portfolio!M$2:M$1000>0))'],
+        ['Satellite (Previous Close)',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Satellite")*(Current_Portfolio!M$2:M$1000>Current_Portfolio!N$2:N$1000)*(Current_Portfolio!M$2:M$1000>0))',
+         '=SUMPRODUCT((Current_Portfolio!D$2:D$1000="Satellite")*(Current_Portfolio!M$2:M$1000<=Current_Portfolio!N$2:N$1000)*(Current_Portfolio!M$2:M$1000>0))']
+    ]
+    
+    _grid_write(grid, f'D{r+1}', sub_metrics)
+    formats.append({"range": f'E{r+1}:F{r+4}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern=NUM_FMT), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'D{r+1}:F{r+4}', "format": cellFormat(borders=_thin_borders())})
+    
+    return r + 5, formats
 
 
 def _header_style():

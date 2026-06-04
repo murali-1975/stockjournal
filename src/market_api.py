@@ -49,7 +49,7 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fe
     """
     import pandas as pd
 
-    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0, 'Company_Name': ''}
+    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0, 'Prev_Month_Close': 0.0, 'Company_Name': ''}
 
     try:
         import yfinance as yf
@@ -110,6 +110,19 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fe
                             if hasattr(prev_week_close, 'item'):
                                 prev_week_close = prev_week_close.item()
                     market_data[sym]['Prev_Week_Close'] = round(float(prev_week_close), 2)
+
+                    # Calculate Previous Month Closing Price
+                    prev_month_close = 0.0
+                    if isinstance(valid_series.index, pd.DatetimeIndex):
+                        try:
+                            m_series = valid_series.resample('ME').last().dropna()
+                        except Exception:
+                            m_series = valid_series.resample('M').last().dropna()
+                        if len(m_series) >= 2:
+                            prev_month_close = m_series.iloc[-2]
+                            if hasattr(prev_month_close, 'item'):
+                                prev_month_close = prev_month_close.item()
+                    market_data[sym]['Prev_Month_Close'] = round(float(prev_month_close), 2)
 
                     # Determine if it's a Satellite stock
                     is_satellite = False
