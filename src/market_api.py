@@ -15,9 +15,54 @@ appended automatically before querying Yahoo Finance.
 Dependencies:
     - yfinance (pip install yfinance)
 """
+import os
+import json
+import logging
+from datetime import datetime, timedelta
+import pandas as pd
 
+logger = logging.getLogger(__name__)
 
-def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fetch_info: bool = True) -> dict:
+# Base directory paths
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CACHE_FILE = os.path.join(BASE_DIR, 'market_info_cache.json')
+
+def load_market_cache() -> dict:
+    """Loads the market metadata cache from market_info_cache.json."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load market cache: {e}")
+    return {}
+
+def save_market_cache(cache: dict) -> None:
+    """Saves the market metadata cache to market_info_cache.json."""
+    try:
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, indent=4)
+    except Exception as e:
+        logger.warning(f"Failed to save market cache: {e}")
+
+def is_cache_fresh(symbol_data: dict, ttl_days: int = 7) -> bool:
+    """Checks if the cached data for a symbol is within the TTL period."""
+    if not symbol_data:
+        return False
+    if 'Company_Name' not in symbol_data or 'Market_Cap' not in symbol_data:
+        return False
+    last_updated_str = symbol_data.get('Last_Updated')
+    if not last_updated_str:
+        return False
+    try:
+        last_updated = datetime.strptime(last_updated_str, '%Y-%m-%d')
+        if datetime.now() - last_updated < timedelta(days=ttl_days):
+            return True
+    except Exception:
+        pass
+    return False
+
+def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fetch_info: bool = True, refresh_cache: bool = False) -> dict:
     """
     Fetches LTP and EMA data from Yahoo Finance for a list of stock symbols.
 
@@ -27,9 +72,11 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fe
     - Satellite stocks: Weekly closing EMAs (resampled to weekly last prices).
 
     Args:
-        symbols: A list of NSE stock ticker symbols (without the '.NS' suffix).
-                 Example: ['RELIANCE', 'TCS', 'INFY']
+        symbols:         A list of NSE stock ticker symbols (without the '.NS' suffix).
+                         Example: ['RELIANCE', 'TCS', 'INFY']
         classifications: Optional dict mapping Symbol to TF_Classification.
+        fetch_info:      If True, fetches Market Cap and Company Name.
+        refresh_cache:   If True, ignores cached values and forces fresh network fetches.
 
     Returns:
         A dictionary mapping each original symbol to its market data:
@@ -39,28 +86,25 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fe
                 'EMA9': 2445.30,
                 'EMA10': 2443.10,
                 'EMA11': 2441.80,
-                'EMA21': 2430.25
+                'EMA21': 2430.25,
+                'Company_Name': 'Reliance Industries Limited',
+                'Market_Cap': 18000000000000
             },
             ...
         }
-
-        Returns default values of 0.0 for all fields if the symbol data
-        is unavailable or if yfinance is not installed.
     """
-    import pandas as pd
-
     default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0, 'Prev_Month_Close': 0.0, 'Company_Name': ''}
 
     try:
         import yfinance as yf
     except ImportError:
-        print("yfinance library not found. Please install it using 'pip install yfinance'.")
+        logger.error("yfinance library not found. Please install it using 'pip install yfinance'.")
         return {sym: default_data.copy() for sym in symbols}
 
     if not symbols:
         return {}
 
-    print(f"Fetching Market Data (LTP, EMAs & Market Cap) from Yahoo Finance for {len(symbols)} symbols...")
+    logger.info(f"Downloading historical pricing from Yahoo Finance for {len(symbols)} symbols...")
     symbol_ns = [sym + '.NS' for sym in symbols]
     market_data = {sym: default_data.copy() for sym in symbols}
 
@@ -155,24 +199,66 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fe
                             ema_val = ema_val.item()
                         market_data[sym][ema_key] = round(float(ema_val), 2)
 
-        # Fetch Market Cap and Splits for each symbol individually
+        # Load metadata cache
+        cache = load_market_cache()
+        if 'symbols' not in cache:
+            cache['symbols'] = {}
+
+        # Handle Market Cap, Company Name, and Splits loading/fetching
+        symbols_to_fetch_info = []
         if fetch_info:
-            for sym, ns_sym in zip(symbols, symbol_ns):
+            for sym in symbols:
+                sym_cache = cache['symbols'].get(sym, {})
+                if refresh_cache or not is_cache_fresh(sym_cache):
+                    symbols_to_fetch_info.append(sym)
+                else:
+                    # Reuse cached data
+                    market_data[sym]['Market_Cap'] = sym_cache['Market_Cap']
+                    market_data[sym]['Company_Name'] = sym_cache['Company_Name']
+                    splits_dict = sym_cache.get('Splits', {})
+                    if splits_dict:
+                        idx = pd.to_datetime(list(splits_dict.keys()))
+                        market_data[sym]['Splits'] = pd.Series(list(splits_dict.values()), index=idx)
+
+        # Fetch missing/expired symbol details
+        if symbols_to_fetch_info:
+            from src.utils import print_progress_bar
+            logger.info(f"Fetching details (Market Cap, Name) for {len(symbols_to_fetch_info)} symbols from Yahoo Finance...")
+
+            for idx, sym in enumerate(symbols_to_fetch_info):
+                ns_sym = sym if sym.endswith('.NS') else f"{sym}.NS"
+                print_progress_bar(idx, len(symbols_to_fetch_info), prefix='Fetching details:', suffix=f'({sym})', length=30)
                 try:
                     ticker = yf.Ticker(ns_sym)
                     info = ticker.info
-                    market_data[sym]['Market_Cap'] = info.get('marketCap', 0) or 0
-                    market_data[sym]['Company_Name'] = info.get('longName') or info.get('shortName') or sym
+                    mcap = info.get('marketCap', 0) or 0
+                    comp_name = info.get('longName') or info.get('shortName') or sym
 
-                    # Fetch split/bonus history
+                    market_data[sym]['Market_Cap'] = mcap
+                    market_data[sym]['Company_Name'] = comp_name
+
+                    # Fetch splits history
                     splits = ticker.splits
+                    splits_dict = {}
                     if splits is not None and not splits.empty:
                         market_data[sym]['Splits'] = splits
-                except Exception:
-                    pass
+                        splits_dict = {dt.strftime('%Y-%m-%d'): float(ratio) for dt, ratio in splits.items()}
+
+                    # Update Cache dict
+                    cache['symbols'][sym] = {
+                        'Company_Name': comp_name,
+                        'Market_Cap': mcap,
+                        'Splits': splits_dict,
+                        'Last_Updated': datetime.now().strftime('%Y-%m-%d')
+                    }
+                except Exception as e:
+                    logger.debug(f"Error fetching details for {sym}: {e}")
+
+            print_progress_bar(len(symbols_to_fetch_info), len(symbols_to_fetch_info), prefix='Fetching details:', suffix='Complete', length=30)
+            save_market_cache(cache)
 
     except Exception as e:
-        print(f"Error fetching data from Yahoo Finance: {e}")
+        logger.error(f"Error fetching data from Yahoo Finance: {e}")
 
     return market_data
 
@@ -193,8 +279,6 @@ def fetch_benchmark_returns(start_date_str: str, custom_benchmarks: list = None)
             ...
         }
     """
-    import pandas as pd
-    
     # Map common index names to their Yahoo Finance ticker symbols
     KNOWN_BENCHMARKS = {
         'NIFTY_50': '^NSEI',
@@ -240,7 +324,7 @@ def fetch_benchmark_returns(start_date_str: str, custom_benchmarks: list = None)
             
         import yfinance as yf
         tickers = list(benchmarks.values())
-        print(f"\nFetching Historical Benchmark Returns since {start_dt.strftime('%d %b %Y')}...")
+        logger.info(f"Fetching Historical Benchmark Returns since {start_dt.strftime('%d %b %Y')}...")
         
         # Start a bit earlier to ensure we catch the start date or closest trading day
         fetch_start = start_dt - pd.Timedelta(days=5)
@@ -272,8 +356,6 @@ def fetch_benchmark_returns(start_date_str: str, custom_benchmarks: list = None)
                         results[name]['Return_Pct'] = (current_price - start_price) / start_price
                         
     except Exception as e:
-        print(f"Error fetching benchmark data: {e}")
+        logger.error(f"Error fetching benchmark data: {e}")
         
     return results
-
-

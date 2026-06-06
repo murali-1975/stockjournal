@@ -415,7 +415,7 @@ def _get_chronological_holding_dates(df_copy: pd.DataFrame) -> dict:
     return symbol_holding_dates
 
 
-def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dict = None, price_updates: dict = None) -> tuple:
+def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dict = None, price_updates: dict = None, refresh_cache: bool = False) -> tuple:
     """
     Calculates current holdings, overall trade summary, and PnL statistics.
 
@@ -484,7 +484,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
 
     # --- Fetch Market Data (LTP & EMAs) for all symbols ---
     symbols = overall_df['Symbol'].tolist()
-    market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications)
+    market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications, refresh_cache=refresh_cache)
 
     def get_ltp(sym):
         if price_updates and sym in price_updates:

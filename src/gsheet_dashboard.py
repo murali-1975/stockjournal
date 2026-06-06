@@ -9,7 +9,20 @@ missing labels, and summation gaps in the Core vs Satellite breakdown.
 import pandas as pd
 import gspread
 import numpy as np
+import logging
 from gspread_formatting import *
+
+logger = logging.getLogger(__name__)
+
+def print(*args, **kwargs):
+    msg = " ".join(str(arg) for arg in args)
+    msg_upper = msg.upper()
+    if "ERROR" in msg_upper or "FAILED" in msg_upper:
+        logger.error(msg)
+    elif "WARNING" in msg_upper or "NOTE:" in msg_upper:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
 
 # Styling Constants
 HEADER_BG = {"red": 47/255, "green": 84/255, "blue": 150/255}
@@ -361,17 +374,56 @@ def _write_pnl_breakdown_by_cap(grid, o_df, r, formats):
 def _write_tranche_distribution(grid, df, r, formats):
     _grid_write(grid, f'I{r}', [['Tranche Distribution']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    _grid_write(grid, f'I{r+1}', [['Tranche', 'Count', '% of Holdings']])
-    formats.append({"range": f'I{r+1}:K{r+1}', "format": _header_style()})
-    cnts = df['Latest_Tranche'].value_counts().sort_index()
-    total = cnts.sum()
-    rows = [[str(k), int(v), float(v/total if total > 0 else 0)] for k,v in cnts.items()]
-    if rows:
-        end_r = r + 1 + len(rows)
-        _grid_write(grid, f'I{r+2}', rows)
-        formats.append({"range": f'J{r+2}:J{end_r}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern=NUM_FMT), horizontalAlignment='RIGHT')})
-        formats.append({"range": f'K{r+2}:K{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
-        formats.append({"range": f'I{r+2}:K{end_r}', "format": cellFormat(borders=_thin_borders())})
+    _grid_write(grid, f'I{r+1}', [['Tranche', 'Core Count', 'Satellite Count', 'Total Count', '% of Holdings']])
+    formats.append({"range": f'I{r+1}:M{r+1}', "format": _header_style()})
+
+    if 'Latest_Tranche' not in df.columns or df.empty:
+        return r + 2, formats
+
+    # Filter out empty or null tranche values
+    valid_df = df[df['Latest_Tranche'].notna() & df['Latest_Tranche'].str.strip().ne('')].copy()
+    if valid_df.empty:
+        return r + 2, formats
+
+    # Group by Tranche and Classification
+    tranche_groups = valid_df.groupby(['Latest_Tranche', 'TF_Classification']).size().unstack(fill_value=0)
+    
+    # Ensure both Core and Satellite columns exist
+    if 'Core' not in tranche_groups.columns:
+        tranche_groups['Core'] = 0
+    if 'Satellite' not in tranche_groups.columns:
+        tranche_groups['Satellite'] = 0
+        
+    tranche_groups['Total'] = tranche_groups['Core'] + tranche_groups['Satellite']
+    tranche_groups = tranche_groups.sort_index()
+    
+    total_holdings = tranche_groups['Total'].sum()
+
+    rows = []
+    for label, r_data in tranche_groups.iterrows():
+        rows.append([
+            str(label),
+            int(r_data['Core']),
+            int(r_data['Satellite']),
+            int(r_data['Total']),
+            float(r_data['Total'] / total_holdings if total_holdings > 0 else 0)
+        ])
+
+    # Add TOTAL row
+    rows.append([
+        'TOTAL',
+        int(tranche_groups['Core'].sum()),
+        int(tranche_groups['Satellite'].sum()),
+        int(total_holdings),
+        1.0
+    ])
+
+    end_r = r + 1 + len(rows)
+    _grid_write(grid, f'I{r+2}', rows)
+    formats.append({"range": f'J{r+2}:L{end_r}', "format": cellFormat(numberFormat=numberFormat(type='NUMBER', pattern=NUM_FMT), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'M{r+2}:M{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'I{end_r}:M{end_r}', "format": cellFormat(textFormat=textFormat(bold=True))})
+    formats.append({"range": f'I{r+2}:M{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
 

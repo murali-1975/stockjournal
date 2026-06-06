@@ -16,3 +16,4 @@ env/
 *.pdf
 credentials.json
 scratch/
+market_info_cache.json

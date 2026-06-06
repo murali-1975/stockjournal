@@ -18,6 +18,19 @@ when the workbook already exists.
 """
 
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+def print(*args, **kwargs):
+    msg = " ".join(str(arg) for arg in args)
+    msg_upper = msg.upper()
+    if "ERROR" in msg_upper or "FAILED" in msg_upper:
+        logger.error(msg)
+    elif "WARNING" in msg_upper or "NOTE:" in msg_upper:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
 
 import pandas as pd
 

@@ -173,7 +173,7 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
     # Column widths
     widths = {'A': 24, 'B': 18, 'C': 18, 'D': 24, 'E': 18, 'F': 18, 'G': 18,
               'H': 4,  # spacer
-              'I': 24, 'J': 18, 'K': 18, 'L': 18}
+              'I': 24, 'J': 18, 'K': 18, 'L': 18, 'M': 18}
     for col, w in widths.items():
         ws.column_dimensions[col].width = w
 
@@ -187,7 +187,7 @@ def create_dashboard(wb, portfolio_df: pd.DataFrame, overall_df: pd.DataFrame, r
         try:
             max_date = pd.to_datetime(raw_df['Trade Date']).max()
             if pd.notna(max_date):
-                ws.merge_cells('I1:L1')
+                ws.merge_cells('I1:M1')
                 ws['I1'].value = f'🕒 Last Transacted Date: {max_date.strftime("%d %b %Y")}'
                 ws['I1'].font = Font(name='Calibri', italic=True, size=12, color='595959', bold=True)
                 ws['I1'].alignment = Alignment(horizontal='right')
@@ -739,23 +739,53 @@ def _write_pnl_by_cap(ws, overall_df, row):
 # ═══════════════════════════════════════════════════════════════════
 
 def _write_tranche_distribution(ws, df, row):
-    """Tranche distribution counts. Returns next free row."""
+    """Tranche distribution counts split by Core vs Satellite. Returns next free row."""
     row = _section_title(ws, row, 9, 'Tranche Distribution')
-    row = _styled_header(ws, row, 9, ['Tranche', 'Count', '% of Holdings'])
+    row = _styled_header(ws, row, 9, ['Tranche', 'Core Count', 'Satellite Count', 'Total Count', '% of Holdings'])
 
     if 'Latest_Tranche' not in df.columns or len(df) == 0:
         _data_cell(ws, row, 9, 'No data')
         return row + 1
 
-    counts = df['Latest_Tranche'].value_counts().sort_index()
-    counts = counts[counts.index != '']
-    total = counts.sum()
+    # Filter out empty or null tranche values
+    valid_df = df[df['Latest_Tranche'].notna() & df['Latest_Tranche'].str.strip().ne('')].copy()
+    if valid_df.empty:
+        _data_cell(ws, row, 9, 'No tranche data available')
+        return row + 1
 
-    for label, cnt in counts.items():
+    # Group by Tranche and Classification
+    tranche_groups = valid_df.groupby(['Latest_Tranche', 'TF_Classification']).size().unstack(fill_value=0)
+    
+    # Ensure both Core and Satellite columns exist
+    if 'Core' not in tranche_groups.columns:
+        tranche_groups['Core'] = 0
+    if 'Satellite' not in tranche_groups.columns:
+        tranche_groups['Satellite'] = 0
+        
+    tranche_groups['Total'] = tranche_groups['Core'] + tranche_groups['Satellite']
+    tranche_groups = tranche_groups.sort_index()
+    
+    total_holdings = tranche_groups['Total'].sum()
+
+    for label, r_data in tranche_groups.iterrows():
+        core_cnt = int(r_data['Core'])
+        sat_cnt = int(r_data['Satellite'])
+        tot_cnt = int(r_data['Total'])
+        
         _data_cell(ws, row, 9, str(label), font=LABEL_FONT)
-        _data_cell(ws, row, 10, int(cnt))
-        _data_cell(ws, row, 11, cnt / total if total > 0 else 0, fmt=PCT_FMT)
+        _data_cell(ws, row, 10, core_cnt)
+        _data_cell(ws, row, 11, sat_cnt)
+        _data_cell(ws, row, 12, tot_cnt)
+        _data_cell(ws, row, 13, tot_cnt / total_holdings if total_holdings > 0 else 0, fmt=PCT_FMT)
         row += 1
+
+    # Add TOTAL row
+    _data_cell(ws, row, 9, 'TOTAL', font=LABEL_FONT)
+    _data_cell(ws, row, 10, int(tranche_groups['Core'].sum()))
+    _data_cell(ws, row, 11, int(tranche_groups['Satellite'].sum()))
+    _data_cell(ws, row, 12, int(total_holdings))
+    _data_cell(ws, row, 13, 1.0, fmt=PCT_FMT)
+    row += 1
 
     return row
 

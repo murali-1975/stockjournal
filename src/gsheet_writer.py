@@ -10,7 +10,20 @@ import pandas as pd
 import numpy as np
 from google.oauth2.service_account import Credentials
 import os
+import logging
 from gspread_formatting import *
+
+logger = logging.getLogger(__name__)
+
+def print(*args, **kwargs):
+    msg = " ".join(str(arg) for arg in args)
+    msg_upper = msg.upper()
+    if "ERROR" in msg_upper or "FAILED" in msg_upper:
+        logger.error(msg)
+    elif "WARNING" in msg_upper or "NOTE:" in msg_upper:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
 
 def format_value(val):
     """Formats a value for Google Sheets compatibility."""
