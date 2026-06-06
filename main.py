@@ -84,6 +84,41 @@ def run_tests() -> bool:
     return result.wasSuccessful()
 
 
+def ensure_files_are_writable(filepaths: list[str]) -> None:
+    """
+    Checks if files are writable. If they are locked (e.g., open in Excel),
+    prompts the user interactively or waits/retries in non-interactive mode.
+    """
+    import time
+    import sys
+    
+    for filepath in filepaths:
+        if not os.path.exists(filepath):
+            continue
+            
+        attempt = 0
+        while True:
+            try:
+                # Try opening in append mode to check write lock
+                with open(filepath, 'a'):
+                    pass
+                break # Successfully verified writable, check next file
+            except PermissionError:
+                if sys.stdin and sys.stdin.isatty():
+                    print(f"\n⚠️  [FILE LOCKED] '{os.path.basename(filepath)}' is currently locked or open in Excel.")
+                    print("   Please save and close the Excel file, then press Enter to retry...")
+                    try:
+                        input()
+                    except KeyboardInterrupt:
+                        print("\nAborted by user.")
+                        sys.exit(1)
+                else:
+                    attempt += 1
+                    if attempt % 6 == 1: # Print every 30 seconds
+                        print(f"⚠️  [FILE LOCKED] Waiting for '{os.path.basename(filepath)}' to be released (locked by another process)...")
+                    time.sleep(5)
+
+
 def main(update_only: bool = False, gsheet_target: str = None):
     """
     Main execution pipeline.
@@ -96,6 +131,9 @@ def main(update_only: bool = False, gsheet_target: str = None):
     input_path = os.path.join(current_dir, 'Tradebook Template.xlsx')
     output_path = os.path.join(current_dir, 'Transformed_Tradebook.xlsx')
     config_path = os.path.join(current_dir, 'input.cfg')
+
+    # Verify that the output workbook is writable before performing calculations
+    ensure_files_are_writable([output_path])
 
     # Step 1: Load configuration
     config = load_config(config_path)
@@ -183,12 +221,32 @@ if __name__ == "__main__":
 
         # Parse filter
         idx = sys.argv.index('--recommend')
-        rec_filter = 'all'
-        if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith('-'):
-            rec_filter = sys.argv[idx + 1].strip().lower()
-            if rec_filter not in ['all', 'add', 'buy', 'sell']:
-                print(f"⚠️ Invalid recommendation filter '{rec_filter}'. Defaulting to 'all'.")
-                rec_filter = 'all'
+        rec_filters = []
+        i = idx + 1
+        while i < len(sys.argv) and not sys.argv[i].startswith('-'):
+            parts = [p.strip().lower() for p in sys.argv[i].split(',')]
+            for p in parts:
+                if p:
+                    rec_filters.append(p)
+            i += 1
+
+        valid_options = {'all', 'add', 'buy', 'sell'}
+        cleaned_filters = []
+        for f in rec_filters:
+            if f in valid_options:
+                cleaned_filters.append(f)
+            else:
+                print(f"⚠️ Invalid recommendation filter '{f}' ignored. Valid values: all, add, buy, sell.")
+        
+        if not cleaned_filters:
+            rec_filter = 'all'
+        elif 'all' in cleaned_filters:
+            rec_filter = 'all'
+        else:
+            rec_filter = ','.join(cleaned_filters)
+
+        # Verify that the output workbook is writable before performing recommendations
+        ensure_files_are_writable([output_path])
 
         try:
             execute_recommendation_bypass(output_path, rec_filter=rec_filter)

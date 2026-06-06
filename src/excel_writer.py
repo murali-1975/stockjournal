@@ -161,6 +161,8 @@ def save_workbook(
     latest_core_trends = {}
     watchlist_df = None
     has_watchlist = False
+    watchlist_market_data = {}  # Cache for watchlist market data to prevent duplicate yfinance downloads
+    
     if os.path.exists(output_file):
         try:
             import openpyxl as op
@@ -194,6 +196,21 @@ def save_workbook(
                     
                     if has_watchlist:
                         watchlist_df = pd.read_excel(xls, sheet_name='Satellite_Watchlist')
+                        # Update columns G, H, I, J in-memory so they are fresh for create_dashboard
+                        if 'Stock' in watchlist_df.columns:
+                            w_symbols = watchlist_df['Stock'].dropna().astype(str).str.strip().str.upper().unique().tolist()
+                            if w_symbols:
+                                from src.market_api import fetch_market_data_from_yahoo
+                                classifications = {sym: 'Satellite' for sym in w_symbols}
+                                watchlist_market_data = fetch_market_data_from_yahoo(w_symbols, classifications=classifications, fetch_info=False)
+                                for idx, row in watchlist_df.iterrows():
+                                    sym = str(row.get('Stock', '')).strip().upper()
+                                    if sym in watchlist_market_data:
+                                        data = watchlist_market_data[sym]
+                                        watchlist_df.at[idx, 'Previous week Close'] = data.get('Prev_Week_Close', 0.0)
+                                        watchlist_df.at[idx, 'EMA 9 (weekly)'] = data.get('EMA9', 0.0)
+                                        watchlist_df.at[idx, 'EMA 11 (weekly)'] = data.get('EMA11', 0.0)
+                                        watchlist_df.at[idx, 'EMA 21 (weekly)'] = data.get('EMA21', 0.0)
         except Exception as e:
             print(f"Note: Watchlists could not be loaded in save_workbook: {e}")
     
@@ -233,6 +250,7 @@ def save_workbook(
 
                 # Create a dummy Price_Update sheet so local formulas don't break during copy
                 writer.book.create_sheet('Price_Update')
+                writer.book.create_sheet('Satellite_Watchlist')
 
                 # --- Format ID columns as flat integers ---
                 _format_id_columns(writer, df, 'Raw_Tradebook')
@@ -337,6 +355,13 @@ def save_workbook(
                             ws_temp = wb_temp.sheets[name]
                             ws_master = wb_master.sheets[name]
                             
+                            # Clear any active filters to ensure all rows are visible and prevent copying issues
+                            try:
+                                if ws_master.api.FilterMode:
+                                    ws_master.api.ShowAllData()
+                            except Exception:
+                                pass
+                            
                             if name in ['Raw_Tradebook', 'Transaction']:
                                 ws_master.clear()
                                 ws_temp.used_range.copy(ws_master.range('A1'))
@@ -386,6 +411,13 @@ def save_workbook(
                     if 'Satellite_Watchlist' in master_sheet_names:
                         ws_watchlist = wb_master.sheets['Satellite_Watchlist']
                         
+                        # Clear any active filters to ensure all rows are visible and prevent bulk-write data mismatch/scrambling
+                        try:
+                            if ws_watchlist.api.FilterMode:
+                                ws_watchlist.api.ShowAllData()
+                        except Exception:
+                            pass
+                        
                         # Ensure headers are set
                         ws_watchlist.range('G1').value = "Previous week Close"
                         ws_watchlist.range('H1').value = "EMA 9 (weekly)"
@@ -408,9 +440,18 @@ def save_workbook(
                                         symbols.append(sym_str)
                                         
                             if symbols:
-                                from src.market_api import fetch_market_data_from_yahoo
-                                classifications = {sym: 'Satellite' for sym in symbols}
-                                market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications, fetch_info=False)
+                                # Reuse cached watchlist_market_data, download only missing symbols (if any)
+                                market_data = {}
+                                missing_symbols = [s for s in symbols if s not in watchlist_market_data]
+                                if missing_symbols:
+                                    from src.market_api import fetch_market_data_from_yahoo
+                                    classifications = {sym: 'Satellite' for sym in missing_symbols}
+                                    new_data = fetch_market_data_from_yahoo(missing_symbols, classifications=classifications, fetch_info=False)
+                                    market_data.update(new_data)
+                                
+                                for sym in symbols:
+                                    if sym in watchlist_market_data:
+                                        market_data[sym] = watchlist_market_data[sym]
                                 
                                 # Construct 2D list for bulk write to save COM roundtrips
                                 rows_to_write = []
@@ -571,7 +612,7 @@ def save_workbook(
 
             # --- Update columns and dynamic conditional formatting for Satellite_Watchlist ---
             print("Updating Satellite_Watchlist columns...")
-            _update_satellite_watchlist_columns(writer, output_file)
+            _update_satellite_watchlist_columns(writer, output_file, market_data_cache=watchlist_market_data)
             print("Applying Satellite_Watchlist formatting...")
             _apply_satellite_watchlist_conditional_formatting(writer)
 
@@ -920,7 +961,7 @@ def _apply_core_watchlist_formatting(writer, df: pd.DataFrame, latest_core_trend
                 symbol_cell.font = Font(color='000000', bold=False)
 
 
-def _update_satellite_watchlist_columns(writer, output_file) -> None:
+def _update_satellite_watchlist_columns(writer, output_file, market_data_cache: dict = None) -> None:
     """
     Reads unique stocks from the Satellite_Watchlist sheet in writer.book,
     downloads weekly data (Prev_Week_Close, EMA 9, EMA 11, EMA 21) from Yahoo Finance,
@@ -931,7 +972,7 @@ def _update_satellite_watchlist_columns(writer, output_file) -> None:
     
     if 'Satellite_Watchlist' not in writer.book.sheetnames:
         return
-
+ 
     ws = writer.book['Satellite_Watchlist']
     
     # Ensure headers are set
@@ -952,11 +993,19 @@ def _update_satellite_watchlist_columns(writer, output_file) -> None:
     if not symbols:
         return
         
-    # Map symbols to 'Satellite' classification so fetch_market_data_from_yahoo Resamples to weekly
-    classifications = {sym: 'Satellite' for sym in symbols}
-    
-    # Fetch market data
-    market_data = fetch_market_data_from_yahoo(symbols, classifications=classifications, fetch_info=False)
+    # Reuse cached market data, download only missing symbols (if any)
+    market_data = {}
+    if market_data_cache:
+        for sym in symbols:
+            if sym in market_data_cache:
+                market_data[sym] = market_data_cache[sym]
+                
+    missing_symbols = [s for s in symbols if s not in market_data]
+    if missing_symbols:
+        # Map symbols to 'Satellite' classification so fetch_market_data_from_yahoo Resamples to weekly
+        classifications = {sym: 'Satellite' for sym in missing_symbols}
+        new_data = fetch_market_data_from_yahoo(missing_symbols, classifications=classifications, fetch_info=False)
+        market_data.update(new_data)
     
     # Formatting for currency columns
     inr_format = '[$₹-en-IN] #,##0.00'

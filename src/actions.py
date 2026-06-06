@@ -27,6 +27,17 @@ HEADERS = [
 ]
 
 
+def _parse_filters(rec_filter) -> set[str]:
+    if not rec_filter:
+        return {'ALL'}
+    if isinstance(rec_filter, str):
+        return {f.strip().upper() for f in rec_filter.split(',') if f.strip()}
+    try:
+        return {str(f).strip().upper() for f in rec_filter if str(f).strip()}
+    except TypeError:
+        return {str(rec_filter).strip().upper()}
+
+
 def load_portfolio_and_tracker(filepath: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Loads 'Current_Portfolio' and 'Action Tracker' worksheets from Excel.
@@ -166,7 +177,7 @@ def generate_action_recommendations(portfolio_df: pd.DataFrame, filepath: str = 
         )
 
     recommendations = []
-    today_str = datetime.date.today().strftime('%d-%m-%Y')
+    today_str = datetime.date.today()
     sell_symbols = set()
 
     # ==================== 1. SELL CALCULATIONS ====================
@@ -498,8 +509,10 @@ def generate_action_recommendations(portfolio_df: pd.DataFrame, filepath: str = 
     recs_df = recs_df.drop(columns=['Action_Sort', 'Tranche_Sort', 'Cheat_Holding_Sort', '_Holding_Period'], errors='ignore')
 
     # Filter by action type if requested
-    if rec_filter and rec_filter != 'all':
-        recs_df = recs_df[recs_df['Action (Recommended) '].str.upper() == rec_filter.upper()]
+    if rec_filter:
+        filters = _parse_filters(rec_filter)
+        if 'ALL' not in filters:
+            recs_df = recs_df[recs_df['Action (Recommended) '].str.upper().isin(filters)]
 
     return recs_df
 
@@ -567,9 +580,17 @@ def write_recommendations_to_excel(filepath: str, new_recs_df: pd.DataFrame, rec
         app = None
         try:
             import xlwings as xw
-            app = xw.App(visible=False)
+            app = xw.App(visible=False, add_book=False)
             app.display_alerts = False
-            wb = app.books.open(os.path.abspath(filepath))
+            app.screen_updating = False
+            try:
+                app.interactive = False
+            except Exception:
+                pass
+            
+            import time
+            wb = app.books.open(os.path.abspath(filepath), update_links=False)
+            time.sleep(1.5)
             
             # Access or create Action Tracker sheet
             sheet_names = [wb.sheets[i].name for i in range(len(wb.sheets))]
@@ -606,14 +627,26 @@ def write_recommendations_to_excel(filepath: str, new_recs_df: pd.DataFrame, rec
             # Same-Day Overwrite Logic
             today_str = datetime.date.today().strftime('%d-%m-%Y')
             if not existing_df.empty:
-                if rec_filter == 'buy':
-                    existing_df = existing_df[~((existing_df['Date'] == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper() == 'BUY'))]
-                elif rec_filter == 'add':
-                    existing_df = existing_df[~((existing_df['Date'] == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper() == 'ADD'))]
-                elif rec_filter == 'sell':
-                    existing_df = existing_df[~((existing_df['Date'] == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper() == 'SELL'))]
+                def format_date_as_str(val):
+                    if not val:
+                        return ""
+                    if isinstance(val, (datetime.datetime, datetime.date)):
+                        return val.strftime('%d-%m-%Y')
+                    try:
+                        dt = pd.to_datetime(val, dayfirst=True, errors='coerce')
+                        if pd.notna(dt):
+                            return dt.strftime('%d-%m-%Y')
+                    except Exception:
+                        pass
+                    return str(val).strip()
+
+                existing_date_strs = existing_df['Date'].apply(format_date_as_str)
+                filters = _parse_filters(rec_filter)
+                if 'ALL' not in filters:
+                    mask = (existing_date_strs == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper().isin(filters))
+                    existing_df = existing_df[~mask]
                 else:
-                    existing_df = existing_df[existing_df['Date'] != today_str]
+                    existing_df = existing_df[existing_date_strs != today_str]
             
             if not new_recs_df.empty:
                 combined_df = pd.concat([existing_df, new_recs_df], ignore_index=True)
@@ -755,14 +788,26 @@ def write_recommendations_to_excel(filepath: str, new_recs_df: pd.DataFrame, rec
     today_str = datetime.date.today().strftime('%d-%m-%Y')
     
     if not existing_df.empty:
-        if rec_filter == 'buy':
-            existing_df = existing_df[~((existing_df['Date'] == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper() == 'BUY'))]
-        elif rec_filter == 'add':
-            existing_df = existing_df[~((existing_df['Date'] == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper() == 'ADD'))]
-        elif rec_filter == 'sell':
-            existing_df = existing_df[~((existing_df['Date'] == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper() == 'SELL'))]
+        def format_date_as_str(val):
+            if not val:
+                return ""
+            if isinstance(val, (datetime.datetime, datetime.date)):
+                return val.strftime('%d-%m-%Y')
+            try:
+                dt = pd.to_datetime(val, dayfirst=True, errors='coerce')
+                if pd.notna(dt):
+                    return dt.strftime('%d-%m-%Y')
+            except Exception:
+                pass
+            return str(val).strip()
+
+        existing_date_strs = existing_df['Date'].apply(format_date_as_str)
+        filters = _parse_filters(rec_filter)
+        if 'ALL' not in filters:
+            mask = (existing_date_strs == today_str) & (existing_df['Action (Recommended) '].astype(str).str.strip().str.upper().isin(filters))
+            existing_df = existing_df[~mask]
         else:
-            existing_df = existing_df[existing_df['Date'] != today_str]
+            existing_df = existing_df[existing_date_strs != today_str]
 
     # Combine existing non-today rows with new recommendations
     if not new_recs_df.empty:

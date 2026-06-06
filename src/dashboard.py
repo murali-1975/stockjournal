@@ -379,12 +379,7 @@ def _write_performance_kpis(ws, start_row, col_start):
     row += 1
 
     # Sub-headers for Advancing / Declining
-    _data_cell(ws, row, col_start, ' ', font=LABEL_FONT)
-    c1 = _data_cell(ws, row, col_start + 1, 'Advancing', font=HEADER_FONT)
-    c1.alignment = Alignment(horizontal='center')
-    c2 = _data_cell(ws, row, col_start + 2, 'Declining', font=HEADER_FONT)
-    c2.alignment = Alignment(horizontal='center')
-    row += 1
+    row = _styled_header(ws, row, col_start, ['TF Classfication', 'Advancing', 'Declining'])
 
     # Advancing / Declining sub-metrics using dynamic SUMPRODUCT formulas
     sub_metrics = [
@@ -1003,9 +998,9 @@ def _write_watchlist_movers_table(ws, watchlist_df, portfolio_df, latest_colors,
         c = _data_cell(ws, row, 9, symbol, font=font)
         if fill: c.fill = fill
         
-        _data_cell(ws, row, 10, s.get('Previous week Close', 0), fmt=INR_FMT)
-        _data_cell(ws, row, 11, s.get('Price', 0), fmt=INR_FMT)
-        _data_cell(ws, row, 12, s.get('Pct_Change', 0), fmt=PCT_FMT)
+        _data_cell(ws, row, 10, f"=VLOOKUP(I{row}, Satellite_Watchlist!$B$2:$G$5000, 6, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 11, f"=VLOOKUP(I{row}, Satellite_Watchlist!$B$2:$G$5000, 4, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 12, f"=IF(J{row}>0, (K{row}-J{row})/J{row}, 0)", fmt=PCT_FMT)
         _apply_dynamic_pnl_color(ws, f"L{row}")
         
         row += 1

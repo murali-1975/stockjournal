@@ -161,6 +161,7 @@ def load_equity_master(config: dict) -> pd.DataFrame | None:
         result = df[['Stock Id', 'TF Sector Classification', 'TF Stock Classfication']].copy()
         result.columns = ['Symbol', 'TF_Sector', 'TF_Classification']
         result['Symbol'] = result['Symbol'].str.strip().str.upper()
+        result = result.drop_duplicates(subset=['Symbol'])
         return result
     except PermissionError:
         print(f"Error loading Equity Master: Permission denied. Please close '{equity_file}' if it is open in Excel and try again.")
