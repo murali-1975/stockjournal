@@ -95,6 +95,46 @@ class TestMarketAPI(unittest.TestCase):
         self.assertIn('STOCK', result)
         self.assertEqual(result['STOCK']['LTP'], 0.0)
 
+    @patch('src.market_api.datetime')
+    @patch('yfinance.Ticker')
+    @patch('yfinance.download')
+    def test_fetch_calendar_relative_closes(self, mock_download, mock_ticker, mock_datetime):
+        """Test that Prev_Week_Close and Prev_Month_Close are calculated calendar-relatively."""
+        import datetime
+        mock_now = MagicMock()
+        # Mock today as Saturday, May 16, 2026
+        mock_now.date.return_value = datetime.date(2026, 5, 16)
+        mock_datetime.now.return_value = mock_now
+
+        # Set up a series of daily prices: April 30 to May 15
+        date_range = pd.date_range(start='2026-05-01', end='2026-05-15', freq='D')
+        index_dates = [pd.Timestamp('2026-04-30')] + list(date_range)
+        prices = [100.0] + [100.0 + idx + 1 for idx in range(len(date_range))]
+        mock_series = pd.Series(prices, index=index_dates)
+        mock_df = pd.DataFrame({'Close': mock_series})
+        mock_download.return_value = mock_df
+
+        # Mock Ticker
+        mock_ticker_instance = MagicMock()
+        mock_ticker_instance.info = {'marketCap': 0}
+        mock_ticker_instance.splits = None
+        mock_ticker.return_value = mock_ticker_instance
+
+        # Call function
+        result = fetch_market_data_from_yahoo(['STOCK'], classifications={'STOCK': 'Satellite'})
+
+        # Verify results:
+        # Today is May 16 (Sat). Target Friday = May 15. Previous week close = May 15 close.
+        # Previous Month Close = April 30 close (100.0).
+        self.assertIn('STOCK', result)
+        data = result['STOCK']
+        
+        # April 30 price is 100.0
+        # May 15 price is 100.0 + 15 = 115.0
+        self.assertEqual(data['Prev_Week_Close'], 115.0)
+        self.assertEqual(data['Prev_Month_Close'], 100.0)
+
 
 if __name__ == '__main__':
     unittest.main()
+

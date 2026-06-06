@@ -93,7 +93,7 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fe
             ...
         }
     """
-    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0, 'Prev_Month_Close': 0.0, 'Company_Name': ''}
+    default_data = {'LTP': 0.0, 'EMA9': 0.0, 'EMA10': 0.0, 'EMA11': 0.0, 'EMA21': 0.0, 'Market_Cap': 0, 'Prev_Day_Close': 0.0, 'Prev_Week_Close': 0.0, 'Prev_Month_Close': 0.0, 'Company_Name': '', 'Prior_Week_Close': 0.0}
 
     try:
         import yfinance as yf
@@ -145,25 +145,47 @@ def fetch_market_data_from_yahoo(symbols: list, classifications: dict = None, fe
                             prev_day_close = prev_day_close.item()
                     market_data[sym]['Prev_Day_Close'] = round(float(prev_day_close), 2)
 
-                    # Calculate Previous Week Closing Price
+                    # Calculate Previous Week Closing Price (calendar-relative)
                     prev_week_close = 0.0
                     if isinstance(valid_series.index, pd.DatetimeIndex):
-                        w_series = valid_series.resample('W').last().dropna()
-                        if len(w_series) >= 2:
-                            prev_week_close = w_series.iloc[-2]
+                        ref_date = datetime.now().date()
+                        wd = ref_date.weekday()  # Monday is 0, Sunday is 6
+                        # If today is Friday (4), Saturday (5), Sunday (6): last completed/current Friday
+                        # If today is Monday-Thursday (0-3): Friday of previous week
+                        if wd >= 4:
+                            target_friday = ref_date - timedelta(days=(wd - 4))
+                        else:
+                            target_friday = ref_date - timedelta(days=(wd + 3))
+
+                        series_dates = valid_series.index.date
+                        matching_indices = [i for i, d in enumerate(series_dates) if d <= target_friday]
+                        if matching_indices:
+                            prev_week_close = valid_series.iloc[matching_indices[-1]]
                             if hasattr(prev_week_close, 'item'):
                                 prev_week_close = prev_week_close.item()
                     market_data[sym]['Prev_Week_Close'] = round(float(prev_week_close), 2)
 
-                    # Calculate Previous Month Closing Price
+                    # Calculate Prior Week Closing Price (for weekly comparison in Movers dashboard)
+                    prior_week_close = 0.0
+                    if isinstance(valid_series.index, pd.DatetimeIndex):
+                        w_series = valid_series.resample('W').last().dropna()
+                        if len(w_series) >= 2:
+                            prior_week_close = w_series.iloc[-2]
+                            if hasattr(prior_week_close, 'item'):
+                                prior_week_close = prior_week_close.item()
+                    market_data[sym]['Prior_Week_Close'] = round(float(prior_week_close), 2)
+
+                    # Calculate Previous Month Closing Price (calendar-relative)
                     prev_month_close = 0.0
                     if isinstance(valid_series.index, pd.DatetimeIndex):
-                        try:
-                            m_series = valid_series.resample('ME').last().dropna()
-                        except Exception:
-                            m_series = valid_series.resample('M').last().dropna()
-                        if len(m_series) >= 2:
-                            prev_month_close = m_series.iloc[-2]
+                        ref_date = datetime.now().date()
+                        # Last day of the previous calendar month
+                        last_day_of_prev_month = ref_date.replace(day=1) - timedelta(days=1)
+                        
+                        series_dates = valid_series.index.date
+                        matching_month_indices = [i for i, d in enumerate(series_dates) if d <= last_day_of_prev_month]
+                        if matching_month_indices:
+                            prev_month_close = valid_series.iloc[matching_month_indices[-1]]
                             if hasattr(prev_month_close, 'item'):
                                 prev_month_close = prev_month_close.item()
                     market_data[sym]['Prev_Month_Close'] = round(float(prev_month_close), 2)

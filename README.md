@@ -27,6 +27,7 @@ A powerful Python-based trading journal and portfolio management system designed
 ## Recent Updates
 
 ### 2026-06-06
+- **Calendar-Relative Closing Prices**: Updated the `Previous week Close` and `Previous month Close` columns in both the watchlists and portfolio sheets to be computed relative to the calendar execution date. This ensures that running on weekends (e.g. Saturday) correctly resolves the recent Friday as the previous week's close, while retaining live Excel Stock Data Type formulas/formatting for the daily `Previous Close` column.
 - **Console Progress Bars & Structured Logging**: Standardized all logging output with clear timestamps. Added visual, zero-dependency ASCII progress bars to prevent console freezing during network-heavy operations.
 - **Local Metadata Caching**: Implemented a local JSON cache (`market_info_cache.json`) for yfinance metadata and splits history, caching details with a 7-day TTL to accelerate subsequent script runs.
 - **Core vs Satellite Tranche Distribution**: Expanded the Tranche Distribution table on both the Excel and Google Sheets dashboards to break down counts by Core and Satellite classifications, shifting layout limits cleanly out to column M.

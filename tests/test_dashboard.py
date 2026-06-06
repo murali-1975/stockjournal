@@ -173,5 +173,38 @@ class TestDashboard(unittest.TestCase):
         self.assertTrue(satellite_header_found, "Satellite Top/Bottom table header missing")
         self.assertTrue(core_header_found, "Core Top/Bottom table header missing")
 
+    def test_movers_tables(self):
+        """Test that movers tables use Prev_Week_Close / Previous week Close columns correctly."""
+        # Add Prev_Week_Close to portfolio_df
+        self.portfolio_df['Prev_Week_Close'] = [3100.0, 1500.0]
+        self.portfolio_df['Prior_Week_Close'] = [3050.0, 1450.0]
+        
+        watchlist_df = pd.DataFrame({
+            'Stock': ['INFY', 'TCS', 'NEWSTOCK'],
+            'Color': ['BLUE', 'GREEN', 'RED'],
+            'Date': ['01-05-2026', '02-05-2026', '03-05-2026'],
+            'Price': [1700.0, 3300.0, 500.0],
+            'Previous week Close': [1600.0, 3200.0, 450.0]
+        })
+        
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df, watchlist_df=watchlist_df)
+        ws = self.wb['Dashboard']
+        
+        found_port_movers = False
+        found_watchlist_movers = False
+        
+        for row in ws.iter_rows(values_only=True):
+            if row:
+                if 'Top 10 Movers (Current Portfolio)' in row:
+                    found_port_movers = True
+                if 'Top 10 Movers (Watchlist Only)' in row:
+                    found_watchlist_movers = True
+                for val in row:
+                    if val and isinstance(val, str) and val.startswith('Error:'):
+                        self.fail(f"Movers table has error: {val}")
+                    
+        self.assertTrue(found_port_movers)
+        self.assertTrue(found_watchlist_movers)
+
 if __name__ == '__main__':
     unittest.main()

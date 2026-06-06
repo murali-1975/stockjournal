@@ -135,7 +135,9 @@ def _convert_portfolios_to_formulas(portfolio_df: pd.DataFrame, overall_df: pd.D
             over_f.at[o_idx, 'Total_PnL'] = f"=P{r}+Q{r}"
             over_f.at[o_idx, 'Total_PnL_Percentage'] = f"=IF(G{r}>0, R{r}/G{r}, 0)"
             
-    return port_f, over_f
+    port_f_write = port_f.drop(columns=['Prior_Week_Close'], errors='ignore')
+    over_f_write = over_f.drop(columns=['Prior_Week_Close'], errors='ignore')
+    return port_f_write, over_f_write
 
 
 def save_workbook(
@@ -224,6 +226,7 @@ def save_workbook(
                                         watchlist_df.at[idx, 'EMA 9 (weekly)'] = data.get('EMA9', 0.0)
                                         watchlist_df.at[idx, 'EMA 11 (weekly)'] = data.get('EMA11', 0.0)
                                         watchlist_df.at[idx, 'EMA 21 (weekly)'] = data.get('EMA21', 0.0)
+                                        watchlist_df.at[idx, 'Prior_Week_Close'] = data.get('Prior_Week_Close', 0.0)
         except Exception as e:
             print(f"Note: Watchlists could not be loaded in save_workbook: {e}")
     

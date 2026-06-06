@@ -496,6 +496,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     overall_df['LTP'] = overall_df['Symbol'].apply(get_ltp)
     overall_df['Prev_Day_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prev_Day_Close', 0.0))
     overall_df['Prev_Week_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prev_Week_Close', 0.0))
+    overall_df['Prior_Week_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prior_Week_Close', 0.0))
     overall_df['Prev_Month_Close'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('Prev_Month_Close', 0.0))
     overall_df['EMA9'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA9', 0.0))
     overall_df['EMA10'] = overall_df['Symbol'].apply(lambda x: market_data.get(x, {}).get('EMA10', 0.0))
@@ -579,7 +580,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         'Current_Quantity', 'Invested_Value', 'LTP', 'Current_Value',
         'Realized_PnL', 'Unrealized_PnL', 'Total_PnL', 'Total_PnL_Percentage',
         'Holding_Period', 'Split_Info', 'Adj_Required',
-        'Prev_Day_Close', 'Prev_Week_Close', 'Prev_Month_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21'
+        'Prev_Day_Close', 'Prev_Week_Close', 'Prev_Month_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Prior_Week_Close'
     ]
     overall_df = overall_df[cols_order].sort_values(by='Symbol')
 
@@ -594,7 +595,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
         ['Symbol', 'Cap', 'TF_Sector', 'TF_Classification', 'Latest_Tranche',
          'Current_Quantity', 'Average_Buy_Price', 'Trend', 'Invested_Value', 'LTP',
          'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
-         'Holding_Period', 'Split_Info', 'Adj_Required', 'Prev_Month_Close']
+         'Holding_Period', 'Split_Info', 'Adj_Required', 'Prev_Month_Close', 'Prior_Week_Close']
     ].copy()
 
     # --- Apply Stop Loss ---
@@ -658,7 +659,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
                  'LTP_SL_Diff', 'LTP_SL_Diff_Pct', 'Invested_Value', 'LTP',
                  'Prev_Day_Close', 'Prev_Week_Close', 'EMA9', 'EMA10', 'EMA11', 'EMA21', 'Current_Value', 'Unrealized_PnL',
                  'Return_Pct', 'XIRR',
-                 'Holding_Period', 'Split_Info', 'Adj_Required', 'Prev_Month_Close']
+                 'Holding_Period', 'Split_Info', 'Adj_Required', 'Prev_Month_Close', 'Prior_Week_Close']
     portfolio_df = portfolio_df[port_cols]
 
     # Sort Current Portfolio: Core first, then Satellite, then alphabetically by Symbol
@@ -668,7 +669,7 @@ def calculate_portfolios(df: pd.DataFrame, grouped_df: pd.DataFrame, config: dic
     portfolio_df = portfolio_df.sort_values(by=['TF_Classification_Sort', 'Symbol']).drop(columns=['TF_Classification_Sort'])
 
     # Remove EMA, Previous Day, Previous Week, and Previous Month Close columns from Overall Portfolio (only needed in Current Portfolio)
-    overall_df = overall_df.drop(columns=['EMA9', 'EMA10', 'EMA11', 'EMA21', 'Prev_Day_Close', 'Prev_Week_Close', 'Prev_Month_Close'])
+    overall_df = overall_df.drop(columns=['EMA9', 'EMA10', 'EMA11', 'EMA21', 'Prev_Day_Close', 'Prev_Week_Close', 'Prev_Month_Close', 'Prior_Week_Close'])
 
     return portfolio_df, overall_df
 
