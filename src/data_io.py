@@ -38,10 +38,15 @@ def load_data(input_file: str) -> pd.DataFrame | None:
     """
     print(f"Reading {input_file}...")
     try:
-        # Detect ID columns and force them to string to prevent scientific notation
-        df_cols = pd.read_excel(input_file, nrows=0).columns
-        dtypes = {col: str for col in df_cols if 'ID' in col.upper()}
-        df = pd.read_excel(input_file, dtype=dtypes)
+        # Detect sheets and prioritize 'Equity'
+        with pd.ExcelFile(input_file) as xls:
+            sheet_names = xls.sheet_names
+            sheet_to_load = 'Equity' if 'Equity' in sheet_names else sheet_names[0]
+            
+            # Detect ID columns and force them to string to prevent scientific notation
+            df_cols = pd.read_excel(xls, sheet_name=sheet_to_load, nrows=0).columns
+            dtypes = {col: str for col in df_cols if 'ID' in col.upper()}
+            df = pd.read_excel(xls, sheet_name=sheet_to_load, dtype=dtypes)
     except FileNotFoundError:
         print(f"Error: {input_file} not found.")
         return None

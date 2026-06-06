@@ -84,10 +84,11 @@ def run_tests() -> bool:
     return result.wasSuccessful()
 
 
-def ensure_files_are_writable(filepaths: list[str]) -> None:
+def ensure_files_accessible(filepaths: list[str], mode: str = 'a') -> None:
     """
-    Checks if files are writable. If they are locked (e.g., open in Excel),
-    prompts the user interactively or waits/retries in non-interactive mode.
+    Checks if files are accessible in the given mode ('a' for write/append, 'r' for read).
+    If they are locked (e.g., open in Excel), prompts the user interactively
+    or waits/retries in non-interactive mode.
     """
     import time
     import sys
@@ -99,14 +100,20 @@ def ensure_files_are_writable(filepaths: list[str]) -> None:
         attempt = 0
         while True:
             try:
-                # Try opening in append mode to check write lock
-                with open(filepath, 'a'):
-                    pass
-                break # Successfully verified writable, check next file
+                if mode == 'a':
+                    # Try opening in append mode to check write lock
+                    with open(filepath, 'a'):
+                        pass
+                else:
+                    # Try opening in read-binary mode to check read lock
+                    with open(filepath, 'rb'):
+                        pass
+                break # Successfully verified accessibility, check next file
             except PermissionError:
+                action_word = "open or modify" if mode == 'a' else "read"
                 if sys.stdin and sys.stdin.isatty():
-                    print(f"\n⚠️  [FILE LOCKED] '{os.path.basename(filepath)}' is currently locked or open in Excel.")
-                    print("   Please save and close the Excel file, then press Enter to retry...")
+                    print(f"\n⚠️  [FILE LOCKED] '{os.path.basename(filepath)}' is currently open or locked in Excel.")
+                    print(f"   Please save and close the Excel file so the program can {action_word} it, then press Enter to retry...")
                     try:
                         input()
                     except KeyboardInterrupt:
@@ -132,8 +139,10 @@ def main(update_only: bool = False, gsheet_target: str = None):
     output_path = os.path.join(current_dir, 'Transformed_Tradebook.xlsx')
     config_path = os.path.join(current_dir, 'input.cfg')
 
-    # Verify that the output workbook is writable before performing calculations
-    ensure_files_are_writable([output_path])
+    # Verify that files are accessible before performing calculations
+    if not update_only:
+        ensure_files_accessible([input_path], mode='r')
+    ensure_files_accessible([output_path], mode='a')
 
     # Step 1: Load configuration
     config = load_config(config_path)
@@ -147,6 +156,10 @@ def main(update_only: bool = False, gsheet_target: str = None):
     else:
         # Step 3: Load new trades from the input template
         new_df = load_data(input_path)
+        if new_df is None:
+            print(f"\n❌ ERROR: Failed to load trade data from '{os.path.basename(input_path)}'.")
+            print("Please ensure the template is not corrupted or locked, and close Excel if it is open.\n")
+            sys.exit(1)
 
         # Step 4: Merge and deduplicate
         df = merge_and_deduplicate(master_df, new_df)
@@ -246,7 +259,7 @@ if __name__ == "__main__":
             rec_filter = ','.join(cleaned_filters)
 
         # Verify that the output workbook is writable before performing recommendations
-        ensure_files_are_writable([output_path])
+        ensure_files_accessible([output_path], mode='a')
 
         try:
             execute_recommendation_bypass(output_path, rec_filter=rec_filter)
