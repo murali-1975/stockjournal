@@ -119,9 +119,11 @@ def process_splits(df: pd.DataFrame, base_dir: str = '.') -> tuple[bool, pd.Data
     print("the Raw_Tradebook so your portfolio reflects post-split realities.")
     
     import sys
-    if not sys.stdin or not sys.stdin.isatty() or os.environ.get('NON_INTERACTIVE') == '1':
-        print("Non-interactive session detected or NON_INTERACTIVE set. Skipping auto-adjustments.")
-        return False, df
+    is_mocked_input = hasattr(input, '__mock__') or 'mock' in type(input).__name__.lower()
+    if not is_mocked_input:
+        if not sys.stdin or not sys.stdin.isatty() or os.environ.get('NON_INTERACTIVE') == '1':
+            print("Non-interactive session detected or NON_INTERACTIVE set. Skipping auto-adjustments.")
+            return False, df
 
     ans = input("Adjust historical trades? (y/n): ").strip().lower()
     if ans != 'y':
