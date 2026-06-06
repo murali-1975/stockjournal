@@ -920,7 +920,7 @@ def _write_top_cheats_table(ws, df, portfolio_styles, row):
 def _write_portfolio_movers_table(ws, df, watchlist_df, portfolio_styles, row):
     import pandas as pd
     row = _section_title(ws, row, 9, 'Top 10 Movers (Current Portfolio)')
-    row = _styled_header(ws, row, 9, ['Symbol', 'Prev Week Close', 'LTP', '% Change'])
+    row = _styled_header(ws, row, 9, ['Symbol', 'Previous Close', 'LTP', '% Change'])
     
     if 'TF_Classification' not in df.columns:
         _data_cell(ws, row, 9, 'No classification data')
@@ -931,16 +931,16 @@ def _write_portfolio_movers_table(ws, df, watchlist_df, portfolio_styles, row):
         _data_cell(ws, row, 9, 'No satellite stocks')
         return row + 1
         
-    if 'Prev_Week_Close' not in sat_df.columns:
-        sat_df['Prev_Week_Close'] = 0.0
+    if 'Prev_Day_Close' not in sat_df.columns:
+        sat_df['Prev_Day_Close'] = 0.0
     if 'LTP' not in sat_df.columns:
         sat_df['LTP'] = 0.0
 
-    sat_df['Prev_Week_Close'] = pd.to_numeric(sat_df['Prev_Week_Close'], errors='coerce').fillna(0)
+    sat_df['Prev_Day_Close'] = pd.to_numeric(sat_df['Prev_Day_Close'], errors='coerce').fillna(0)
     sat_df['LTP'] = pd.to_numeric(sat_df['LTP'], errors='coerce').fillna(0)
     sat_df['Pct_Change'] = 0.0
-    mask = sat_df['Prev_Week_Close'] > 0
-    sat_df.loc[mask, 'Pct_Change'] = (sat_df.loc[mask, 'LTP'] - sat_df.loc[mask, 'Prev_Week_Close']) / sat_df.loc[mask, 'Prev_Week_Close']
+    mask = sat_df['Prev_Day_Close'] > 0
+    sat_df.loc[mask, 'Pct_Change'] = (sat_df.loc[mask, 'LTP'] - sat_df.loc[mask, 'Prev_Day_Close']) / sat_df.loc[mask, 'Prev_Day_Close']
     
     top10 = sat_df.nlargest(10, 'Pct_Change')
     
@@ -953,7 +953,7 @@ def _write_portfolio_movers_table(ws, df, watchlist_df, portfolio_styles, row):
         c = _data_cell(ws, row, 9, symbol, font=font)
         if fill: c.fill = fill
         
-        _data_cell(ws, row, 10, f"=VLOOKUP(I{row}, Current_Portfolio!$A$2:$Z$1000, 15, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 10, f"=VLOOKUP(I{row}, Current_Portfolio!$A$2:$Z$1000, 14, FALSE)", fmt=INR_FMT)
         _data_cell(ws, row, 11, f"=VLOOKUP(I{row}, Current_Portfolio!$A$2:$Z$1000, 13, FALSE)", fmt=INR_FMT)
         _data_cell(ws, row, 12, f"=IF(J{row}>0, (K{row}-J{row})/J{row}, 0)", fmt=PCT_FMT)
         _apply_dynamic_pnl_color(ws, f"L{row}")
@@ -965,7 +965,7 @@ def _write_portfolio_movers_table(ws, df, watchlist_df, portfolio_styles, row):
 def _write_watchlist_movers_table(ws, watchlist_df, portfolio_df, latest_colors, row):
     import pandas as pd
     row = _section_title(ws, row, 9, 'Top 10 Movers (Watchlist Only)')
-    row = _styled_header(ws, row, 9, ['Symbol', 'Prev Week Close', 'Price', '% Change'])
+    row = _styled_header(ws, row, 9, ['Symbol', 'Previous Close', 'Price', '% Change'])
     
     if watchlist_df is None or watchlist_df.empty:
         _data_cell(ws, row, 9, 'No Watchlist found')
@@ -973,7 +973,8 @@ def _write_watchlist_movers_table(ws, watchlist_df, portfolio_df, latest_colors,
         
     try:
         wdf = watchlist_df.copy()
-        wdf = wdf.dropna(subset=['Stock', 'Color', 'Price', 'Previous week Close'])
+        wdf.columns = wdf.columns.astype(str).str.strip()
+        wdf = wdf.dropna(subset=['Stock', 'Color', 'Price', 'Previous Close'])
         wdf['Stock'] = wdf['Stock'].astype(str).str.strip()
         wdf['Color'] = wdf['Color'].astype(str).str.strip().str.upper()
         wdf['Date'] = pd.to_datetime(wdf['Date'], dayfirst=True, errors='coerce')
@@ -983,12 +984,12 @@ def _write_watchlist_movers_table(ws, watchlist_df, portfolio_df, latest_colors,
         portfolio_stocks = set(portfolio_df['Symbol'].astype(str).str.strip())
         wdf = wdf[~wdf['Stock'].isin(portfolio_stocks)]
         
-        wdf['Previous week Close'] = pd.to_numeric(wdf['Previous week Close'], errors='coerce').fillna(0)
+        wdf['Previous Close'] = pd.to_numeric(wdf['Previous Close'], errors='coerce').fillna(0)
         wdf['Price'] = pd.to_numeric(wdf['Price'], errors='coerce').fillna(0)
         
         wdf['Pct_Change'] = 0.0
-        mask = wdf['Previous week Close'] > 0
-        wdf.loc[mask, 'Pct_Change'] = (wdf.loc[mask, 'Price'] - wdf.loc[mask, 'Previous week Close']) / wdf.loc[mask, 'Previous week Close']
+        mask = wdf['Previous Close'] > 0
+        wdf.loc[mask, 'Pct_Change'] = (wdf.loc[mask, 'Price'] - wdf.loc[mask, 'Previous Close']) / wdf.loc[mask, 'Previous Close']
         
         wdf = wdf[wdf['Pct_Change'] > 0]
         top10 = wdf.nlargest(10, 'Pct_Change')
@@ -1028,7 +1029,7 @@ def _write_watchlist_movers_table(ws, watchlist_df, portfolio_df, latest_colors,
         c = _data_cell(ws, row, 9, symbol, font=font)
         if fill: c.fill = fill
         
-        _data_cell(ws, row, 10, f"=VLOOKUP(I{row}, Satellite_Watchlist!$B$2:$G$5000, 6, FALSE)", fmt=INR_FMT)
+        _data_cell(ws, row, 10, f"=VLOOKUP(I{row}, Satellite_Watchlist!$B$2:$G$5000, 5, FALSE)", fmt=INR_FMT)
         _data_cell(ws, row, 11, f"=VLOOKUP(I{row}, Satellite_Watchlist!$B$2:$G$5000, 4, FALSE)", fmt=INR_FMT)
         _data_cell(ws, row, 12, f"=IF(J{row}>0, (K{row}-J{row})/J{row}, 0)", fmt=PCT_FMT)
         _apply_dynamic_pnl_color(ws, f"L{row}")

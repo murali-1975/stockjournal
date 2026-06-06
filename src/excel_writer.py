@@ -68,7 +68,7 @@ def _find_price_update_columns_from_file(output_file: str) -> tuple:
                         symbol_col_letter = get_column_letter(col_idx)
                     elif header in ['LTP', 'LAST TRADED PRICE', 'LAST_TRADED_PRICE', 'PRICE']:
                         ltp_col_letter = get_column_letter(col_idx)
-                    elif header in ['PREVIOUS DAY CLOSE', 'PREV DAY CLOSE', 'PREV_DAY_CLOSE']:
+                    elif header in ['PREVIOUS DAY CLOSE', 'PREV DAY CLOSE', 'PREV_DAY_CLOSE', 'PREVIOUS CLOSE', 'PREV CLOSE', 'PREV_CLOSE', 'PREVIOUS_CLOSE']:
                         prev_close_col_letter = get_column_letter(col_idx)
             if symbol_col_letter and ltp_col_letter and prev_close_col_letter:
                 break
