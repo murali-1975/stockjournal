@@ -215,6 +215,20 @@ def main(update_only: bool = False, gsheet_target: str = None, refresh_cache: bo
             "Current_Portfolio": portfolio_df,
             "Overall_Portfolio": overall_df
         }
+        
+        # Load additional sheets from local Excel for sync
+        import pandas as pd
+        try:
+            with pd.ExcelFile(output_path) as xls:
+                if 'Action Tracker' in xls.sheet_names:
+                    data_to_export['Action Tracker'] = pd.read_excel(xls, 'Action Tracker')
+                if 'Core_Watchlist' in xls.sheet_names:
+                    data_to_export['Core_Watchlist'] = pd.read_excel(xls, 'Core_Watchlist')
+                if 'Satellite_Watchlist' in xls.sheet_names:
+                    data_to_export['Satellite_Watchlist'] = pd.read_excel(xls, 'Satellite_Watchlist')
+        except Exception as e:
+            logger.warning(f"Note: Could not load watchlists/action tracker from local Excel: {e}")
+            
         logger.info(f"Exporting results to Google Sheets: {gsheet_target}...")
         
         # 1. Export Data Sheets

@@ -25,11 +25,13 @@ def print(*args, **kwargs):
     else:
         logger.info(msg)
 
+import datetime
+
 def format_value(val):
     """Formats a value for Google Sheets compatibility."""
     if pd.isna(val):
         return ""
-    if isinstance(val, (pd.Timestamp, np.datetime64)):
+    if isinstance(val, (pd.Timestamp, np.datetime64, datetime.datetime, datetime.date)):
         return str(val)
     return val
 
@@ -72,6 +74,18 @@ def save_to_gsheet(data_frames, sheet_name_or_id, credentials_path="credentials.
     except Exception as e:
         print(f"Error opening spreadsheet: {e}")
         return
+
+    # Delete legacy sheets to clean up the workbook
+    legacy_sheets = ['Sheet1', 'Grouped_Trades', 'Portfolio']
+    for sheet_name in legacy_sheets:
+        try:
+            ws_to_del = sh.worksheet(sheet_name)
+            sh.del_worksheet(ws_to_del)
+            print(f"Removed legacy worksheet: {sheet_name}")
+        except gspread.WorksheetNotFound:
+            pass
+        except Exception as e:
+            print(f"Note: Could not delete legacy sheet '{sheet_name}': {e}")
 
     # 3. Write each DataFrame to its own tab
     for tab_name, df in data_frames.items():
@@ -132,9 +146,10 @@ def _apply_sheet_styles(worksheet, df):
         col_range = f'{col_letter}2:{col_letter}1000'
         
         # Detection logic
-        is_num = any(x in col.upper() for x in ['VALUE', 'PRICE', 'PNL', 'LTP', 'SL', 'EMA', 'QTY', 'QUANTITY', 'HOLDING', 'CLOSE'])
-        is_pct = 'PCT' in col.upper() or '%' in col
-        is_int = any(x in col.upper() for x in ['QTY', 'QUANTITY', 'COUNT', 'ID'])
+        col_upper = str(col).upper()
+        is_num = any(x in col_upper for x in ['VALUE', 'PRICE', 'PNL', 'LTP', 'SL', 'EMA', 'QTY', 'QUANTITY', 'HOLDING', 'CLOSE'])
+        is_pct = 'PCT' in col_upper or '%' in str(col)
+        is_int = any(x in col_upper for x in ['QTY', 'QUANTITY', 'COUNT', 'ID'])
         
         if is_num:
             if is_pct:
@@ -498,7 +513,7 @@ def _update_gsheet_satellite_watchlist(sh) -> None:
         headers[9] = "EMA 21 (weekly)"
         
         # Update headers in Google Sheet
-        watchlist_ws.update('A1:J1', [headers])
+        watchlist_ws.update('A1:J1', [headers[:10]])
         
         # Build 2D values list for D2:J
         row_updates = []

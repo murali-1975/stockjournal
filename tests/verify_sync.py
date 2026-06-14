@@ -20,7 +20,10 @@ def verify_sync(excel_path, gsheet_name):
             "Raw_Tradebook": pd.read_excel(excel_path, sheet_name="Raw_Tradebook"),
             "Transaction": pd.read_excel(excel_path, sheet_name="Transaction"),
             "Current_Portfolio": pd.read_excel(excel_path, sheet_name="Current_Portfolio"),
-            "Overall_Portfolio": pd.read_excel(excel_path, sheet_name="Overall_Portfolio")
+            "Overall_Portfolio": pd.read_excel(excel_path, sheet_name="Overall_Portfolio"),
+            "Action Tracker": pd.read_excel(excel_path, sheet_name="Action Tracker"),
+            "Core_Watchlist": pd.read_excel(excel_path, sheet_name="Core_Watchlist"),
+            "Satellite_Watchlist": pd.read_excel(excel_path, sheet_name="Satellite_Watchlist")
         }
     except Exception as e:
         print(f"Error reading Excel: {e}")
