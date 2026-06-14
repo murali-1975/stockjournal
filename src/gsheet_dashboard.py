@@ -135,7 +135,9 @@ def build_gsheet_dashboard(sh, portfolio_df, overall_df, benchmark_returns=None)
     row += 2
     row, formats = _write_corporate_actions(grid, portfolio_df, overall_df, row, formats)
     row += 2
-    row, formats = _write_top_cheats_table(grid, portfolio_df, row, formats)
+    row, formats = _write_top_cheats_table(grid, portfolio_df, row, formats, classification_filter='Satellite')
+    row += 2
+    row, formats = _write_top_cheats_table(grid, portfolio_df, row, formats, classification_filter='Core')
 
     # Right Side
     rrow = 3
@@ -293,18 +295,19 @@ def _write_cap_allocation(grid, df, r, formats):
 def _write_core_satellite_distribution(grid, df, r, formats):
     _grid_write(grid, f'I{r}', [['Core & Satellite Distribution']])
     formats.append({"range": f'I{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
-    _grid_write(grid, f'I{r+1}', [['Classification', 'Invested (₹)', '% of Total']])
-    formats.append({"range": f'I{r+1}:K{r+1}', "format": _header_style()})
-    grouped = df.groupby('TF_Classification').agg({'Invested_Value': 'sum'}).sort_values('Invested_Value', ascending=False)
-    total = grouped['Invested_Value'].sum()
-    rows = [[str(k), float(v['Invested_Value']), float(v['Invested_Value']/total if total > 0 else 0)] for k, v in grouped.iterrows()]
-    rows.append(['TOTAL', float(total), 1.0])
+    _grid_write(grid, f'I{r+1}', [['Classification', 'Invested (₹)', '% of Total', 'Returns']])
+    formats.append({"range": f'I{r+1}:L{r+1}', "format": _header_style()})
+    if 'TF_Classification' not in df.columns: return r + 2, formats
+    grouped = df.groupby('TF_Classification', dropna=False).agg({'Invested_Value': 'sum', 'Unrealized_PnL': 'sum'}).sort_values('Invested_Value', ascending=False)
+    total_i = grouped['Invested_Value'].sum()
+    rows = [[str(k) if pd.notna(k) and k!='' else '', float(v['Invested_Value']), float(v['Invested_Value']/total_i if total_i > 0 else 0), float(v['Unrealized_PnL']/v['Invested_Value'] if v['Invested_Value'] > 0 else 0)] for k,v in grouped.iterrows()]
+    rows.append(['TOTAL', float(total_i), 1.0, float(grouped['Unrealized_PnL'].sum()/total_i if total_i > 0 else 0)])
     end_r = r + 1 + len(rows)
     _grid_write(grid, f'I{r+2}', rows)
     formats.append({"range": f'J{r+2}:J{end_r}', "format": cellFormat(numberFormat=numberFormat(type='CURRENCY', pattern=INR_FMT), horizontalAlignment='RIGHT')})
-    formats.append({"range": f'K{r+2}:K{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
-    formats.append({"range": f'I{end_r}:K{end_r}', "format": cellFormat(textFormat=textFormat(bold=True))})
-    formats.append({"range": f'I{r+2}:K{end_r}', "format": cellFormat(borders=_thin_borders())})
+    formats.append({"range": f'K{r+2}:L{end_r}', "format": cellFormat(numberFormat=numberFormat(type='PERCENT', pattern=PCT_FMT), horizontalAlignment='RIGHT')})
+    formats.append({"range": f'I{end_r}:L{end_r}', "format": cellFormat(textFormat=textFormat(bold=True))})
+    formats.append({"range": f'I{r+2}:L{end_r}', "format": cellFormat(borders=_thin_borders())})
     return r + 2 + len(rows), formats
 
 
@@ -458,8 +461,8 @@ def _write_corporate_actions(grid, p_df, o_df, r, formats):
     return r + 2 + len(rows), formats
 
 
-def _write_top_cheats_table(grid, df, r, formats):
-    _grid_write(grid, f'A{r}', [['Top 5 Cheat Stocks by Holding Period']])
+def _write_top_cheats_table(grid, df, r, formats, classification_filter='Satellite'):
+    _grid_write(grid, f'A{r}', [[f'Top 5 Cheat Stocks ({classification_filter}) by Holding Period']])
     formats.append({"range": f'A{r}', "format": cellFormat(textFormat=textFormat(bold=True, fontSize=12, foregroundColor=SECTION_FG))})
     _grid_write(grid, f'A{r+1}', [['Stock Name', 'Cheat', 'Holding Period (Days)', 'Invested Value', 'Current Value', 'Return %', 'XIRR']])
     formats.append({"range": f'A{r+1}:G{r+1}', "format": _header_style()})
@@ -467,9 +470,13 @@ def _write_top_cheats_table(grid, df, r, formats):
     if 'Latest_Tranche' not in df.columns or df.empty:
         return r + 2, formats
 
-    cheat_df = df[df['Latest_Tranche'].str.startswith('Cheat', na=False)].copy()
+    mask = df['Latest_Tranche'].str.startswith('Cheat', na=False)
+    if 'TF_Classification' in df.columns:
+        mask = mask & (df['TF_Classification'] == classification_filter)
+    cheat_df = df[mask].copy()
+
     if cheat_df.empty:
-        _grid_write(grid, f'A{r+2}', [['No active cheat stocks in portfolio']])
+        _grid_write(grid, f'A{r+2}', [[f'No active {classification_filter} cheat stocks in portfolio']])
         return r + 3, formats
 
     top_cheats = cheat_df.sort_values(by='Holding_Period', ascending=False).head(5)

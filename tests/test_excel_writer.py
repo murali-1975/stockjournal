@@ -247,31 +247,65 @@ class TestSaveWorkbook(unittest.TestCase):
         self.assertIn(tcs_cell.fill.fill_type, [None, 'none'])
         self.assertFalse(tcs_cell.font.bold)
         
-        # 2. Read back and verify styling on 'Dashboard' sheet
+        # 2. Read back and verify formula insertion on 'Dashboard' sheet
         self.assertIn('Dashboard', wb.sheetnames)
         ws_db = wb['Dashboard']
         
-        # Scan Dashboard sheet columns for RELIANCE and TCS
-        reliance_db_cell, tcs_db_cell = None, None
+        # Scan Dashboard sheet Column A for the headers
+        sat_tb_row = None
+        core_tb_row = None
+        sat_dl_row = None
+        core_dl_row = None
         for r in range(1, ws_db.max_row + 1):
-            for c in range(1, ws_db.max_column + 1):
-                cell_val = ws_db.cell(row=r, column=c).value
-                if cell_val == 'RELIANCE':
-                    reliance_db_cell = ws_db.cell(row=r, column=c)
-                elif cell_val == 'TCS':
-                    tcs_db_cell = ws_db.cell(row=r, column=c)
-                    
-        self.assertIsNotNone(reliance_db_cell)
-        self.assertIsNotNone(tcs_db_cell)
+            val = ws_db.cell(row=r, column=1).value
+            if val == 'Top 5 Gainers / Bottom 5 Losers (Satellite)':
+                sat_tb_row = r
+            elif val == 'Top 5 Gainers / Bottom 5 Losers (Core)':
+                core_tb_row = r
+            elif val == 'Top 10 underperforming Satellite Stocks (LTP < Prev Day Close)':
+                sat_dl_row = r
+            elif val == 'Top 10 underperforming Core Stocks (LTP < Prev Day Close)':
+                core_dl_row = r
+                
+        self.assertIsNotNone(sat_tb_row, "Satellite table header not found on Dashboard")
+        self.assertIsNotNone(core_tb_row, "Core table header not found on Dashboard")
+        self.assertIsNotNone(sat_dl_row, "Satellite daily losers header not found on Dashboard")
+        self.assertIsNotNone(core_dl_row, "Core daily losers header not found on Dashboard")
         
-        # RELIANCE cell in Dashboard must be colored green
-        self.assertIn(reliance_db_cell.fill.start_color.rgb, ['0000B050', 'FF00B050'])
-        self.assertTrue(reliance_db_cell.font.bold)
-        self.assertEqual(reliance_db_cell.font.color.rgb, '00000000')
+        # Check formula in the first data cell under headers
+        sat_formula = ws_db.cell(row=sat_tb_row + 2, column=1).value
+        core_formula = ws_db.cell(row=core_tb_row + 2, column=1).value
+        sat_dl_formula = ws_db.cell(row=sat_dl_row + 2, column=1).value
+        core_dl_formula = ws_db.cell(row=core_dl_row + 2, column=1).value
         
-        # TCS cell in Dashboard must have cleared background
-        self.assertIn(tcs_db_cell.fill.fill_type, [None, 'none'])
-        self.assertTrue(tcs_db_cell.font.bold)
+        self.assertIsNotNone(sat_formula)
+        self.assertIsNotNone(core_formula)
+        self.assertIsNotNone(sat_dl_formula)
+        self.assertIsNotNone(core_dl_formula)
+        
+        self.assertTrue(sat_formula.startswith('='))
+        if 'LET' in sat_formula:
+            self.assertIn('Current_Portfolio', sat_formula)
+        else:
+            self.assertIn('Gainers/Losers (Satellite)', sat_formula)
+            
+        self.assertTrue(core_formula.startswith('='))
+        if 'LET' in core_formula:
+            self.assertIn('Current_Portfolio', core_formula)
+        else:
+            self.assertIn('Gainers/Losers (Core)', core_formula)
+
+        self.assertTrue(sat_dl_formula.startswith('='))
+        if 'LET' in sat_dl_formula:
+            self.assertIn('Current_Portfolio', sat_dl_formula)
+        else:
+            self.assertIn('Daily Losers (Satellite)', sat_dl_formula)
+
+        self.assertTrue(core_dl_formula.startswith('='))
+        if 'LET' in core_dl_formula:
+            self.assertIn('Current_Portfolio', core_dl_formula)
+        else:
+            self.assertIn('Daily Losers (Core)', core_dl_formula)
         
         wb.close()
 

@@ -86,6 +86,7 @@ def process_grouped_trades(df: pd.DataFrame, config: dict = None) -> pd.DataFram
                     'tranch_count': 0,
                     'cheat_count': 0,
                     'accumulated_cheat_value': 0.0,
+                    'total_buy_value': 0.0,
                     'current_quantity': 0.0
                 }
 
@@ -95,8 +96,10 @@ def process_grouped_trades(df: pd.DataFrame, config: dict = None) -> pd.DataFram
                     symbol_state[symbol]['tranch_count'] = 0
                     symbol_state[symbol]['cheat_count'] = 0
                     symbol_state[symbol]['accumulated_cheat_value'] = 0.0
+                    symbol_state[symbol]['total_buy_value'] = 0.0
                     symbol_state[symbol]['current_quantity'] = 0.0
                 symbol_state[symbol]['current_quantity'] += total_quantity
+                symbol_state[symbol]['total_buy_value'] += total_value
             elif trade_type == 'sell':
                 symbol_state[symbol]['current_quantity'] -= total_quantity
                 if symbol_state[symbol]['current_quantity'] < 1e-5:
@@ -108,6 +111,17 @@ def process_grouped_trades(df: pd.DataFrame, config: dict = None) -> pd.DataFram
 
             # Configure dynamic tolerance
             tranch_tolerance_ratio = config.get('TRANCH_TOLERANCE', 0.10)
+
+            # If we are already at Tranch 1 or higher in this active cycle,
+            # we bypass standard cheat/tranche classification and progress tranches
+            # using the 10% marginal tolerance limit.
+            if symbol_state[symbol]['tranch_count'] >= 1:
+                k = math.ceil(symbol_state[symbol]['total_buy_value'] / tranch_size - 0.10) if tranch_size > 0 else 1
+                k = max(k, symbol_state[symbol]['tranch_count'])
+                symbol_state[symbol]['tranch_count'] = k
+                labels.append(f"Tranch {k}")
+                continue
+
 
             # Check for Tranch match (+/- tolerance)
             approx_tranch_multiplier = round(total_value / tranch_size) if tranch_size > 0 else 0

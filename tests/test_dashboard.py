@@ -49,6 +49,7 @@ class TestDashboard(unittest.TestCase):
         self.overall_df = pd.DataFrame({
             'Symbol': ['TCS', 'INFY', 'WIPRO'],
             'Cap': ['Large Cap', 'Large Cap', 'Large Cap'],
+            'TF_Sector': ['IT', 'IT', 'IT'],
             'Realized_PnL': [1000.0, -500.0, 200.0],
             'Unrealized_PnL': [2000.0, 500.0, 0.0],
             'Split_Info': ['', '', '2:1 Split on 2024-01-01'],
@@ -205,6 +206,264 @@ class TestDashboard(unittest.TestCase):
                     
         self.assertTrue(found_port_movers)
         self.assertTrue(found_watchlist_movers)
+
+    def test_performance_column(self):
+        """Test that the Performance column is correctly generated in the Advancing/Declining table."""
+        # Execute the main function
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        ws = self.wb['Dashboard']
+        
+        # Scan Dashboard sheet for the table header row
+        header_row_idx = None
+        for r in range(1, ws.max_row + 1):
+            val = ws.cell(row=r, column=4).value # col_start is 4 (Column D)
+            if val == 'TF Classfication':
+                header_row_idx = r
+                break
+                
+        self.assertIsNotNone(header_row_idx, "Advancing/Declining table header row not found")
+        
+        # Verify the headers
+        headers = [ws.cell(row=header_row_idx, column=c).value for c in range(4, 8)]
+        self.assertEqual(headers, ['TF Classfication', 'Advancing', 'Declining', 'Performance'])
+        
+        # Verify the 4 sub-metrics data rows
+        expected_rows = [
+            ('Core (Previous month close)', 'AA'),
+            ('Satellite (Previous week close)', 'O'),
+            ('Core (Previous Close)', 'N'),
+            ('Satellite (Previous Close)', 'N')
+        ]
+        
+        for idx, (label, baseline_col) in enumerate(expected_rows):
+            r = header_row_idx + 1 + idx
+            
+            # Check label in column D (4)
+            self.assertEqual(ws.cell(row=r, column=4).value, label)
+            
+            # Check formula in column G (7)
+            perf_formula = ws.cell(row=r, column=7).value
+            self.assertIsNotNone(perf_formula)
+            self.assertTrue(perf_formula.startswith('='))
+            self.assertIn('LET(curr,', perf_formula)
+            self.assertIn(f'${baseline_col}$1000', perf_formula) # should reference baseline close column
+            
+            # Check format in column G (7)
+            self.assertEqual(ws.cell(row=r, column=7).number_format, '0.00%;[Red]-0.00%')
+
+    def test_classification_allocation_columns(self):
+        """Test that Core & Satellite Distribution table includes Realized and Un-Realized columns with correct formulas."""
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        ws = self.wb['Dashboard']
+        
+        # Scan Dashboard sheet Column A (1) for the table section title
+        title_row_idx = None
+        for r in range(1, ws.max_row + 1):
+            val = ws.cell(row=r, column=1).value
+            if val == 'Core & Satellite Distribution':
+                title_row_idx = r
+                break
+                
+        self.assertIsNotNone(title_row_idx, "Core & Satellite Distribution section title not found")
+        
+        # Header is in the next row
+        header_row_idx = title_row_idx + 1
+        headers = [ws.cell(row=header_row_idx, column=c).value for c in range(1, 7)]
+        self.assertEqual(headers, ['Classification', 'Invested (₹)', '% of Total', 'Returns', 'Realized (₹)', 'Un-Realized (₹)'])
+        
+        # Check data rows: Core and Satellite
+        expected_classes = ['Core', 'Satellite']
+        for idx, classification in enumerate(expected_classes):
+            r = header_row_idx + 1 + idx
+            self.assertEqual(ws.cell(row=r, column=1).value, classification)
+            
+            # Realized (Col 5 / E)
+            realized_formula = ws.cell(row=r, column=5).value
+            self.assertEqual(realized_formula, f'=SUMIF(Overall_Portfolio!$D$2:$D$1000, "{classification}", Overall_Portfolio!$P$2:$P$1000)')
+            self.assertEqual(ws.cell(row=r, column=5).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # Un-Realized (Col 6 / F)
+            unrealized_formula = ws.cell(row=r, column=6).value
+            self.assertEqual(unrealized_formula, f'=SUMIF(Current_Portfolio!$D$2:$D$1000, "{classification}", Current_Portfolio!$U$2:$U$1000)')
+            self.assertEqual(ws.cell(row=r, column=6).number_format, '[$₹-en-IN] #,##0.00')
+            
+        # Check TOTAL row (row after the data rows)
+        total_row_idx = header_row_idx + 1 + len(expected_classes)
+        self.assertEqual(ws.cell(row=total_row_idx, column=1).value, 'TOTAL')
+        
+        realized_total = ws.cell(row=total_row_idx, column=5).value
+        self.assertEqual(realized_total, f'=SUM(E{header_row_idx+1}:E{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=5).number_format, '[$₹-en-IN] #,##0.00')
+        
+        unrealized_total = ws.cell(row=total_row_idx, column=6).value
+        self.assertEqual(unrealized_total, f'=SUM(F{header_row_idx+1}:F{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=6).number_format, '[$₹-en-IN] #,##0.00')
+
+    def test_cap_allocation_and_pnl_columns(self):
+        """Test that Cap Allocation & PnL Breakdown table includes merged columns and correct formulas."""
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        ws = self.wb['Dashboard']
+        
+        # Scan Dashboard sheet Column A (1) for the table section title
+        title_row_idx = None
+        for r in range(1, ws.max_row + 1):
+            val = ws.cell(row=r, column=1).value
+            if val == 'Cap Allocation & PnL Breakdown':
+                title_row_idx = r
+                break
+                
+        self.assertIsNotNone(title_row_idx, "Cap Allocation & PnL Breakdown section title not found")
+        
+        # Header is in the next row
+        header_row_idx = title_row_idx + 1
+        headers = [ws.cell(row=header_row_idx, column=c).value for c in range(1, 8)]
+        self.assertEqual(headers, ['Cap', 'Invested (₹)', '% of Total', 'Returns', 'Realized (₹)', 'Un-Realized (₹)', 'Total PnL (₹)'])
+        
+        # Check data rows: Cap category (sorted alphabetically)
+        expected_caps = ['Large Cap']
+        for idx, cap in enumerate(expected_caps):
+            r = header_row_idx + 1 + idx
+            self.assertEqual(ws.cell(row=r, column=1).value, cap)
+            
+            # Invested (Col 2 / B)
+            invested_formula = ws.cell(row=r, column=2).value
+            self.assertEqual(invested_formula, f'=SUMIF(Current_Portfolio!$B$2:$B$1000, "{cap}", Current_Portfolio!$L$2:$L$1000)')
+            self.assertEqual(ws.cell(row=r, column=2).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # % of Total (Col 3 / C)
+            total_row_idx = header_row_idx + 1 + len(expected_caps)
+            pct_formula = ws.cell(row=r, column=3).value
+            self.assertEqual(pct_formula, f'=B{r}/$B${total_row_idx}')
+            self.assertEqual(ws.cell(row=r, column=3).number_format, '0.00%')
+            
+            # Returns (Col 4 / D)
+            returns_formula = ws.cell(row=r, column=4).value
+            self.assertEqual(returns_formula, f'=IF(B{r}>0, (SUMIF(Current_Portfolio!$B$2:$B$1000, "{cap}", Current_Portfolio!$T$2:$T$1000) - B{r}) / B{r}, 0)')
+            self.assertEqual(ws.cell(row=r, column=4).number_format, '0.00%')
+            
+            # Realized (Col 5 / E)
+            realized_formula = ws.cell(row=r, column=5).value
+            self.assertEqual(realized_formula, f'=SUMIF(Overall_Portfolio!$B$2:$B$1000, "{cap}", Overall_Portfolio!$P$2:$P$1000)')
+            self.assertEqual(ws.cell(row=r, column=5).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # Un-Realized (Col 6 / F)
+            unrealized_formula = ws.cell(row=r, column=6).value
+            self.assertEqual(unrealized_formula, f'=SUMIF(Current_Portfolio!$B$2:$B$1000, "{cap}", Current_Portfolio!$U$2:$U$1000)')
+            self.assertEqual(ws.cell(row=r, column=6).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # Total PnL (Col 7 / G)
+            total_pnl_formula = ws.cell(row=r, column=7).value
+            self.assertEqual(total_pnl_formula, f'=E{r}+F{r}')
+            self.assertEqual(ws.cell(row=r, column=7).number_format, '[$₹-en-IN] #,##0.00')
+            
+        # Check TOTAL row
+        total_row_idx = header_row_idx + 1 + len(expected_caps)
+        self.assertEqual(ws.cell(row=total_row_idx, column=1).value, 'TOTAL')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=2).value, f'=SUM(B{header_row_idx+1}:B{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=2).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=3).value, 1.0)
+        self.assertEqual(ws.cell(row=total_row_idx, column=3).number_format, '0.00%')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=4).value, f'=IF(B{total_row_idx}>0, (SUM(Current_Portfolio!$T$2:$T$1000) - B{total_row_idx}) / B{total_row_idx}, 0)')
+        self.assertEqual(ws.cell(row=total_row_idx, column=4).number_format, '0.00%')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=5).value, f'=SUM(E{header_row_idx+1}:E{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=5).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=6).value, f'=SUM(F{header_row_idx+1}:F{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=6).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=7).value, f'=SUM(G{header_row_idx+1}:G{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=7).number_format, '[$₹-en-IN] #,##0.00')
+
+    def test_sector_allocation_and_pnl_columns(self):
+        """Test that Sector Allocation & PnL Breakdown table includes merged columns and correct formulas."""
+        create_dashboard(self.wb, self.portfolio_df, self.overall_df)
+        ws = self.wb['Dashboard']
+        
+        # Scan Dashboard sheet Column A (1) for the table section title
+        title_row_idx = None
+        for r in range(1, ws.max_row + 1):
+            val = ws.cell(row=r, column=1).value
+            if val == 'Sector Allocation & PnL Breakdown':
+                title_row_idx = r
+                break
+                
+        self.assertIsNotNone(title_row_idx, "Sector Allocation & PnL Breakdown section title not found")
+        
+        # Header is in the next row
+        header_row_idx = title_row_idx + 1
+        headers = [ws.cell(row=header_row_idx, column=c).value for c in range(1, 9)]
+        self.assertEqual(headers, ['Sector', 'Core (₹)', 'Satellite (₹)', 'Total Invested (₹)', '% of Total', 'Realized (₹)', 'Un-Realized (₹)', 'Total PnL (₹)'])
+        
+        # Check data rows: Sector category
+        expected_sectors = ['IT']
+        for idx, sector in enumerate(expected_sectors):
+            r = header_row_idx + 1 + idx
+            self.assertEqual(ws.cell(row=r, column=1).value, sector)
+            
+            # Core (Col 2 / B)
+            core_formula = ws.cell(row=r, column=2).value
+            self.assertEqual(core_formula, f'=SUMIFS(Current_Portfolio!$L$2:$L$1000, Current_Portfolio!$C$2:$C$1000, "{sector}", Current_Portfolio!$D$2:$D$1000, "*Core*")')
+            self.assertEqual(ws.cell(row=r, column=2).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # Satellite (Col 3 / C)
+            sat_formula = ws.cell(row=r, column=3).value
+            self.assertEqual(sat_formula, f'=SUMIFS(Current_Portfolio!$L$2:$L$1000, Current_Portfolio!$C$2:$C$1000, "{sector}", Current_Portfolio!$D$2:$D$1000, "*Satellite*")')
+            self.assertEqual(ws.cell(row=r, column=3).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # Total Invested (Col 4 / D)
+            total_inv_formula = ws.cell(row=r, column=4).value
+            self.assertEqual(total_inv_formula, f'=B{r}+C{r}')
+            self.assertEqual(ws.cell(row=r, column=4).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # % of Total (Col 5 / E)
+            total_row_idx = header_row_idx + 1 + len(expected_sectors)
+            pct_formula = ws.cell(row=r, column=5).value
+            self.assertEqual(pct_formula, f'=D{r}/$D${total_row_idx}')
+            self.assertEqual(ws.cell(row=r, column=5).number_format, '0.00%')
+            
+            # Realized (Col 6 / F)
+            realized_formula = ws.cell(row=r, column=6).value
+            self.assertEqual(realized_formula, f'=SUMIF(Overall_Portfolio!$C$2:$C$1000, "{sector}", Overall_Portfolio!$P$2:$P$1000)')
+            self.assertEqual(ws.cell(row=r, column=6).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # Un-Realized (Col 7 / G)
+            unrealized_formula = ws.cell(row=r, column=7).value
+            self.assertEqual(unrealized_formula, f'=SUMIF(Current_Portfolio!$C$2:$C$1000, "{sector}", Current_Portfolio!$U$2:$U$1000)')
+            self.assertEqual(ws.cell(row=r, column=7).number_format, '[$₹-en-IN] #,##0.00')
+            
+            # Total PnL (Col 8 / H)
+            total_pnl_formula = ws.cell(row=r, column=8).value
+            self.assertEqual(total_pnl_formula, f'=F{r}+G{r}')
+            self.assertEqual(ws.cell(row=r, column=8).number_format, '[$₹-en-IN] #,##0.00')
+            
+        # Check TOTAL row
+        total_row_idx = header_row_idx + 1 + len(expected_sectors)
+        self.assertEqual(ws.cell(row=total_row_idx, column=1).value, 'TOTAL')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=2).value, f'=SUM(B{header_row_idx+1}:B{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=2).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=3).value, f'=SUM(C{header_row_idx+1}:C{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=3).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=4).value, f'=SUM(D{header_row_idx+1}:D{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=4).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=5).value, 1.0)
+        self.assertEqual(ws.cell(row=total_row_idx, column=5).number_format, '0.00%')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=6).value, f'=SUM(F{header_row_idx+1}:F{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=6).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=7).value, f'=SUM(G{header_row_idx+1}:G{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=7).number_format, '[$₹-en-IN] #,##0.00')
+        
+        self.assertEqual(ws.cell(row=total_row_idx, column=8).value, f'=SUM(H{header_row_idx+1}:H{total_row_idx-1})')
+        self.assertEqual(ws.cell(row=total_row_idx, column=8).number_format, '[$₹-en-IN] #,##0.00')
 
 if __name__ == '__main__':
     unittest.main()

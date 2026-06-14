@@ -135,7 +135,7 @@ def _convert_portfolios_to_formulas(portfolio_df: pd.DataFrame, overall_df: pd.D
             over_f.at[o_idx, 'Total_PnL'] = f"=P{r}+Q{r}"
             over_f.at[o_idx, 'Total_PnL_Percentage'] = f"=IF(G{r}>0, R{r}/G{r}, 0)"
             
-    port_f_write = port_f.drop(columns=['Prior_Week_Close'], errors='ignore')
+    port_f_write = port_f
     over_f_write = over_f.drop(columns=['Prior_Week_Close'], errors='ignore')
     return port_f_write, over_f_write
 
@@ -414,14 +414,379 @@ def save_workbook(
                         wb_master.sheets['Dashboard'].name = 'Dashboard'
                         master_sheet_names.insert(0, 'Dashboard')
                         
-                    # Clean up corrupted external links caused by cross-workbook sheet copying
-                    for sheet_name in ['Dashboard', 'Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
-                        if sheet_name in master_sheet_names:
-                            try:
-                                # Find and replace all instances of the temporary workbook name in formulas
-                                wb_master.sheets[sheet_name].api.Cells.Replace(What="[temp_transformed.xlsx]", Replacement="", LookAt=2)
-                            except Exception:
-                                pass
+                        # Dynamically write the Excel 365 Dynamic Array formulas via xlwings to avoid openpyxl XML issues
+                        try:
+                            ws_dash = wb_master.sheets['Dashboard']
+                            
+                            COLOR_MAP = {
+                                'BLUE':   {'bg': 'DDEBF7', 'font': '1F4E78'},
+                                'ORANGE': {'bg': 'FCE4D6', 'font': 'C65911'},
+                                'GREEN':  {'bg': 'E2EFDA', 'font': '375623'},
+                                'RED':    {'bg': 'FADBD8', 'font': 'A93226'},
+                                'PINK':   {'bg': 'FADBD8', 'font': 'A93226'},
+                                'YELLOW': {'bg': 'FFF2CC', 'font': '7F6000'},
+                                'PURPLE': {'bg': 'E1D5E7', 'font': '60497A'}
+                            }
+
+                            def hex_to_bgr_decimal(hex_str):
+                                hex_str = hex_str.strip().upper()
+                                r_str = hex_str[0:2]
+                                g_str = hex_str[2:4]
+                                b_str = hex_str[4:6]
+                                return int(b_str + g_str + r_str, 16)
+
+                            # 1. Top 10 Movers (Current Portfolio)
+                            movers_row = -1
+                            for r in range(1, 150):
+                                val = ws_dash.range(r, 10).value
+                                if val == "Top 10 Movers (Current Portfolio)":
+                                    movers_row = r
+                                    break
+                            if movers_row != -1:
+                                movers_formula_row = movers_row + 2
+                                movers_formula = (
+                                    "=LET(\n"
+                                    "    portfolio, Current_Portfolio!$A$2:$AB$1000,\n"
+                                    "    symbols, INDEX(portfolio, , 1),\n"
+                                    "    classifications, INDEX(portfolio, , 4),\n"
+                                    "    ltp, INDEX(portfolio, , 13),\n"
+                                    "    pwc, INDEX(portfolio, , 28),\n"
+                                    "    pct_change, IF(pwc > 0, (ltp - pwc) / pwc, 0),\n"
+                                    "    filtered, FILTER(HSTACK(symbols, pwc, ltp, pct_change), (classifications=\"Satellite\")*(pwc>0), \"No data\"),\n"
+                                    "    IF(INDEX(filtered, 1, 1)=\"No data\", \"No dynamic movers found\", TAKE(SORT(filtered, 4, -1), 10))\n"
+                                    ")"
+                                )
+                                ws_dash.range(movers_formula_row, 10).formula2 = movers_formula
+
+                                # Add Column J conditional formatting rules using COM directly in master
+                                r_range = ws_dash.range(f"J{movers_formula_row}:J{movers_formula_row+9}")
+                                r_range.api.FormatConditions.Delete()
+                                
+                                for color_name, style in COLOR_MAP.items():
+                                    formula = f'=VLOOKUP($J{movers_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
+                                    fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
+                                    fc.Font.Color = hex_to_bgr_decimal(style['font'])
+                                    fc.Font.Bold = True
+                                    
+                                default_formula = f'=ISNA(VLOOKUP($J{movers_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
+                                fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
+                                fc_def.Font.Bold = True
+
+                            # 2. Top 10 Movers (Watchlist Only)
+                            wl_movers_row = -1
+                            for r in range(1, 150):
+                                val = ws_dash.range(r, 10).value
+                                if val == "Top 10 Movers (Watchlist Only)":
+                                    wl_movers_row = r
+                                    break
+                            if wl_movers_row != -1:
+                                wl_formula_row = wl_movers_row + 2
+                                
+                                # Clear any existing values in the 10x4 area to avoid #SPILL!
+                                for r_offset in range(10):
+                                    for c_offset in range(4):
+                                        ws_dash.range(wl_formula_row + r_offset, 10 + c_offset).value = None
+
+                                wl_movers_formula = (
+                                    "=LET(\n"
+                                    "    w_symbols, Satellite_Watchlist!$B$2:$B$1000,\n"
+                                    "    w_prices, Satellite_Watchlist!$E$2:$E$1000,\n"
+                                    "    w_pwc, Satellite_Watchlist!$G$2:$G$1000,\n"
+                                    "    portfolio_symbols, Current_Portfolio!$A$2:$A$1000,\n"
+                                    "    raw_unique, UNIQUE(FILTER(w_symbols, w_symbols <> \"\", \"No data\")),\n"
+                                    "    unique_symbols, FILTER(raw_unique, ISNA(MATCH(raw_unique, portfolio_symbols, 0)), \"No data\"),\n"
+                                    "    IF(INDEX(unique_symbols, 1, 1)=\"No data\", \"No dynamic watchlist movers found\",\n"
+                                    "        LET(\n"
+                                    "            prices, IFERROR(XLOOKUP(unique_symbols, w_symbols, w_prices, 0, 0, -1), 0),\n"
+                                    "            pwc, IFERROR(XLOOKUP(unique_symbols, w_symbols, w_pwc, 0, 0, -1), 0),\n"
+                                    "            pct_change, IFERROR(IF(pwc > 0, (prices - pwc) / pwc, 0), 0),\n"
+                                    "            hstack_tbl, HSTACK(unique_symbols, pwc, prices, pct_change),\n"
+                                    "            filtered, FILTER(hstack_tbl, pct_change > 0, \"No data\"),\n"
+                                    "            IF(INDEX(filtered, 1, 1)=\"No data\", \"No positive watchlist movers found\", TAKE(SORT(filtered, 4, -1), 10))\n"
+                                    "        )\n"
+                                    "    )\n"
+                                    ")"
+                                )
+                                ws_dash.range(wl_formula_row, 10).formula2 = wl_movers_formula
+
+                                # Add Column J conditional formatting rules using COM directly in master
+                                wl_r_range = ws_dash.range(f"J{wl_formula_row}:J{wl_formula_row+9}")
+                                wl_r_range.api.FormatConditions.Delete()
+                                
+                                for color_name, style in COLOR_MAP.items():
+                                    formula = f'=VLOOKUP($J{wl_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    fc = wl_r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
+                                    fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
+                                    fc.Font.Color = hex_to_bgr_decimal(style['font'])
+                                    fc.Font.Bold = True
+                                    
+                                default_formula = f'=ISNA(VLOOKUP($J{wl_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                fc_def = wl_r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
+                                fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
+                                fc_def.Font.Bold = True
+
+                            # 3. Top 5 Gainers / Bottom 5 Losers (Satellite)
+                            sat_tb_row = -1
+                            for r in range(1, 150):
+                                val = ws_dash.range(r, 1).value
+                                if val == "Top 5 Gainers / Bottom 5 Losers (Satellite)":
+                                    sat_tb_row = r
+                                    break
+                            if sat_tb_row != -1:
+                                formula_row = sat_tb_row + 2
+                                
+                                # Clear any existing values in the 10x6 area to avoid #SPILL!
+                                for r_offset in range(10):
+                                    for c_offset in range(6):
+                                        ws_dash.range(formula_row + r_offset, 1 + c_offset).value = None
+                                        
+                                sat_tb_formula = (
+                                    "=LET(\n"
+                                    "    portfolio, Current_Portfolio!$A$2:$V$1000,\n"
+                                    "    symbols, INDEX(portfolio, , 1),\n"
+                                    "    classifications, INDEX(portfolio, , 4),\n"
+                                    "    invested, INDEX(portfolio, , 12),\n"
+                                    "    current, INDEX(portfolio, , 20),\n"
+                                    "    pnl, INDEX(portfolio, , 21),\n"
+                                    "    pnl_pct, INDEX(portfolio, , 22),\n"
+                                    "    filtered, FILTER(HSTACK(symbols, classifications, invested, current, pnl, pnl_pct), (classifications=\"Satellite\")*(symbols<>\"\"), \"No data\"),\n"
+                                    "    IF(INDEX(filtered, 1, 1)=\"No data\", \"No dynamic satellite data found\",\n"
+                                    "        LET(\n"
+                                    "            sorted, SORT(filtered, 5, -1),\n"
+                                    "            n_rows, ROWS(sorted),\n"
+                                    "            IF(n_rows <= 10, sorted, VSTACK(TAKE(sorted, 5), TAKE(sorted, -5)))\n"
+                                    "        )\n"
+                                    "    )\n"
+                                    ")"
+                                )
+                                ws_dash.range(formula_row, 1).formula2 = sat_tb_formula
+
+                                # Add Column A conditional formatting rules using COM directly in master
+                                r_range = ws_dash.range(f"A{formula_row}:A{formula_row+9}")
+                                r_range.api.FormatConditions.Delete()
+                                
+                                for color_name, style in COLOR_MAP.items():
+                                    formula = f'=VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
+                                    fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
+                                    fc.Font.Color = hex_to_bgr_decimal(style['font'])
+                                    fc.Font.Bold = True
+                                    
+                                default_formula = f'=ISNA(VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
+                                fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
+                                fc_def.Font.Bold = True
+
+                            # 4. Top 5 Gainers / Bottom 5 Losers (Core)
+                            core_tb_row = -1
+                            for r in range(1, 150):
+                                val = ws_dash.range(r, 1).value
+                                if val == "Top 5 Gainers / Bottom 5 Losers (Core)":
+                                    core_tb_row = r
+                                    break
+                            if core_tb_row != -1:
+                                formula_row = core_tb_row + 2
+                                
+                                # Clear any existing values in the 10x6 area to avoid #SPILL!
+                                for r_offset in range(10):
+                                    for c_offset in range(6):
+                                        ws_dash.range(formula_row + r_offset, 1 + c_offset).value = None
+                                        
+                                core_tb_formula = (
+                                    "=LET(\n"
+                                    "    portfolio, Current_Portfolio!$A$2:$V$1000,\n"
+                                    "    symbols, INDEX(portfolio, , 1),\n"
+                                    "    classifications, INDEX(portfolio, , 4),\n"
+                                    "    invested, INDEX(portfolio, , 12),\n"
+                                    "    current, INDEX(portfolio, , 20),\n"
+                                    "    pnl, INDEX(portfolio, , 21),\n"
+                                    "    pnl_pct, INDEX(portfolio, , 22),\n"
+                                    "    filtered, FILTER(HSTACK(symbols, classifications, invested, current, pnl, pnl_pct), (classifications=\"Core\")*(symbols<>\"\"), \"No data\"),\n"
+                                    "    IF(INDEX(filtered, 1, 1)=\"No data\", \"No dynamic core data found\",\n"
+                                    "        LET(\n"
+                                    "            sorted, SORT(filtered, 5, -1),\n"
+                                    "            n_rows, ROWS(sorted),\n"
+                                    "            IF(n_rows <= 10, sorted, VSTACK(TAKE(sorted, 5), TAKE(sorted, -5)))\n"
+                                    "        )\n"
+                                    "    )\n"
+                                    ")"
+                                )
+                                ws_dash.range(formula_row, 1).formula2 = core_tb_formula
+
+                                # Add Column A conditional formatting rules using COM directly in master
+                                r_range = ws_dash.range(f"A{formula_row}:A{formula_row+9}")
+                                r_range.api.FormatConditions.Delete()
+                                
+                                CORE_COLOR_MAP = {
+                                    'Strong Trend- Green': {'bg': '00B050', 'font': 'FFFFFF'},
+                                    'Medium Trend':        {'bg': 'FFC000', 'font': '000000'},
+                                    'Weak Trend- Red':    {'bg': 'DC3939', 'font': 'FFFFFF'},
+                                    'Core-Weekly':         {'bg': 'B1A0C7', 'font': '000000'}
+                                }
+                                for trend_name, style in CORE_COLOR_MAP.items():
+                                    formula = f'=VLOOKUP($A{formula_row}, Core_Watchlist!$B$2:$G$5000, 6, FALSE)="{trend_name}"'
+                                    fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
+                                    fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
+                                    fc.Font.Color = hex_to_bgr_decimal(style['font'])
+                                    fc.Font.Bold = True
+
+                            # 5. Stocks Nearest to Stop Loss
+                            sl_tb_row = -1
+                            for r in range(1, 150):
+                                val = ws_dash.range(r, 1).value
+                                if val == "⚠️ Stocks Nearest to Stop Loss":
+                                    sl_tb_row = r
+                                    break
+                            if sl_tb_row != -1:
+                                formula_row = sl_tb_row + 2
+                                
+                                # Clear any existing values in the 10x7 area to avoid #SPILL!
+                                for r_offset in range(10):
+                                    for c_offset in range(7):
+                                        ws_dash.range(formula_row + r_offset, 1 + c_offset).value = None
+                                        
+                                sl_tb_formula = (
+                                    "=LET(\n"
+                                    "    portfolio, Current_Portfolio!$A$2:$V$1000,\n"
+                                    "    symbols, INDEX(portfolio, , 1),\n"
+                                    "    classifications, INDEX(portfolio, , 4),\n"
+                                    "    tranches, INDEX(portfolio, , 5),\n"
+                                    "    sl, INDEX(portfolio, , 9),\n"
+                                    "    diff_val, INDEX(portfolio, , 10),\n"
+                                    "    diff_pct, INDEX(portfolio, , 11),\n"
+                                    "    ltp, INDEX(portfolio, , 13),\n"
+                                    "    filtered, FILTER(HSTACK(symbols, classifications, ltp, sl, diff_val, diff_pct, tranches), (classifications<>\"Core\")*(symbols<>\"\")*(sl>0), \"No data\"),\n"
+                                    "    IF(INDEX(filtered, 1, 1)=\"No data\", \"No stocks near stop loss\", TAKE(SORT(filtered, 6, 1), 10))\n"
+                                    ")"
+                                )
+                                ws_dash.range(formula_row, 1).formula2 = sl_tb_formula
+
+                                # Add Column A conditional formatting rules using COM directly in master
+                                r_range = ws_dash.range(f"A{formula_row}:A{formula_row+9}")
+                                r_range.api.FormatConditions.Delete()
+                                
+                                for color_name, style in COLOR_MAP.items():
+                                    formula = f'=VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
+                                    fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
+                                    fc.Font.Color = hex_to_bgr_decimal(style['font'])
+                                    fc.Font.Bold = True
+                                    
+                                default_formula = f'=ISNA(VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
+                                fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
+                                fc_def.Font.Bold = True
+
+                            # 6. Top 10 underperforming Satellite Stocks (LTP < Prev Day Close)
+                            sat_dl_row = -1
+                            for r in range(1, 150):
+                                val = ws_dash.range(r, 1).value
+                                if val == "Top 10 underperforming Satellite Stocks (LTP < Prev Day Close)":
+                                    sat_dl_row = r
+                                    break
+                            if sat_dl_row != -1:
+                                formula_row = sat_dl_row + 2
+                                
+                                # Clear any existing values in the 10x8 area to avoid #SPILL!
+                                for r_offset in range(10):
+                                    for c_offset in range(8):
+                                        ws_dash.range(formula_row + r_offset, 1 + c_offset).value = None
+                                        
+                                sat_dl_formula = (
+                                    "=LET(\n"
+                                    "    portfolio, Current_Portfolio!$A$2:$V$1000,\n"
+                                    "    symbols, INDEX(portfolio, , 1),\n"
+                                    "    classifications, INDEX(portfolio, , 4),\n"
+                                    "    invested, INDEX(portfolio, , 12),\n"
+                                    "    ltp, INDEX(portfolio, , 13),\n"
+                                    "    pdc, INDEX(portfolio, , 14),\n"
+                                    "    return_pct, INDEX(portfolio, , 22),\n"
+                                    "    change_val, ltp - pdc,\n"
+                                    "    change_pct, IF(pdc > 0, change_val / pdc, 0),\n"
+                                    "    filtered, FILTER(HSTACK(symbols, classifications, invested, pdc, ltp, change_val, change_pct, return_pct), (classifications=\"Satellite\")*(symbols<>\"\")*(ltp>0)*(pdc>0)*(ltp<pdc), \"No data\"),\n"
+                                    "    IF(INDEX(filtered, 1, 1)=\"No data\", \"No dynamic satellite losers found\", TAKE(SORT(filtered, 7, 1), 10))\n"
+                                    ")"
+                                )
+                                ws_dash.range(formula_row, 1).formula2 = sat_dl_formula
+
+                                # Add Column A conditional formatting rules using COM directly in master
+                                r_range = ws_dash.range(f"A{formula_row}:A{formula_row+9}")
+                                r_range.api.FormatConditions.Delete()
+                                
+                                for color_name, style in COLOR_MAP.items():
+                                    formula = f'=VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
+                                    fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
+                                    fc.Font.Color = hex_to_bgr_decimal(style['font'])
+                                    fc.Font.Bold = True
+                                    
+                                default_formula = f'=ISNA(VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
+                                fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
+                                fc_def.Font.Bold = True
+
+                            # 7. Top 10 underperforming Core Stocks (LTP < Prev Day Close)
+                            core_dl_row = -1
+                            for r in range(1, 150):
+                                val = ws_dash.range(r, 1).value
+                                if val == "Top 10 underperforming Core Stocks (LTP < Prev Day Close)":
+                                    core_dl_row = r
+                                    break
+                            if core_dl_row != -1:
+                                formula_row = core_dl_row + 2
+                                
+                                # Clear any existing values in the 10x8 area to avoid #SPILL!
+                                for r_offset in range(10):
+                                    for c_offset in range(8):
+                                        ws_dash.range(formula_row + r_offset, 1 + c_offset).value = None
+                                        
+                                core_dl_formula = (
+                                    "=LET(\n"
+                                    "    portfolio, Current_Portfolio!$A$2:$V$1000,\n"
+                                    "    symbols, INDEX(portfolio, , 1),\n"
+                                    "    classifications, INDEX(portfolio, , 4),\n"
+                                    "    invested, INDEX(portfolio, , 12),\n"
+                                    "    ltp, INDEX(portfolio, , 13),\n"
+                                    "    pdc, INDEX(portfolio, , 14),\n"
+                                    "    return_pct, INDEX(portfolio, , 22),\n"
+                                    "    change_val, ltp - pdc,\n"
+                                    "    change_pct, IF(pdc > 0, change_val / pdc, 0),\n"
+                                    "    filtered, FILTER(HSTACK(symbols, classifications, invested, pdc, ltp, change_val, change_pct, return_pct), (classifications=\"Core\")*(symbols<>\"\")*(ltp>0)*(pdc>0)*(ltp<pdc), \"No data\"),\n"
+                                    "    IF(INDEX(filtered, 1, 1)=\"No data\", \"No dynamic core losers found\", TAKE(SORT(filtered, 7, 1), 10))\n"
+                                    ")"
+                                )
+                                ws_dash.range(formula_row, 1).formula2 = core_dl_formula
+
+                                # Add Column A conditional formatting rules using COM directly in master
+                                r_range = ws_dash.range(f"A{formula_row}:A{formula_row+9}")
+                                r_range.api.FormatConditions.Delete()
+                                
+                                CORE_COLOR_MAP = {
+                                    'Strong Trend- Green': {'bg': '00B050', 'font': 'FFFFFF'},
+                                    'Medium Trend':        {'bg': 'FFC000', 'font': '000000'},
+                                    'Weak Trend- Red':    {'bg': 'DC3939', 'font': 'FFFFFF'},
+                                    'Core-Weekly':         {'bg': 'B1A0C7', 'font': '000000'}
+                                }
+                                for trend_name, style in CORE_COLOR_MAP.items():
+                                    formula = f'=VLOOKUP($A{formula_row}, Core_Watchlist!$B$2:$G$5000, 6, FALSE)="{trend_name}"'
+                                    fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
+                                    fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
+                                    fc.Font.Color = hex_to_bgr_decimal(style['font'])
+                                    fc.Font.Bold = True
+
+                        except Exception as movers_err:
+                            print(f"Warning: Failed to write dynamic movers formula/formatting via xlwings: {movers_err}")
+                        
+                        # Clean up corrupted external links caused by cross-workbook sheet copying
+                        for sheet_name in ['Dashboard', 'Raw_Tradebook', 'Transaction', 'Current_Portfolio', 'Overall_Portfolio']:
+                            if sheet_name in master_sheet_names:
+                                try:
+                                    # Find and replace all instances of the temporary workbook name in formulas
+                                    wb_master.sheets[sheet_name].api.Cells.Replace(What="[temp_transformed.xlsx]", Replacement="", LookAt=2)
+                                except Exception:
+                                    pass
                     
                     # 3. Update Satellite_Watchlist Columns G, H, I, J using xlwings
                     if 'Satellite_Watchlist' in master_sheet_names:
@@ -497,7 +862,7 @@ def save_workbook(
                         # Auto-fit watchlist columns
                         ws_watchlist.autofit()
                     
-                    # Save and close the master workbook
+                                        # Save and close the master workbook
                     wb_master.save()
                     wb_master.close()
                     wb_temp.saved = True
@@ -709,6 +1074,7 @@ def _auto_fit_columns_and_freeze(writer, sheet_name: str) -> None:
         sheet_name: The target worksheet name.
     """
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
 
     worksheet = writer.sheets[sheet_name]
     
@@ -728,19 +1094,21 @@ def _auto_fit_columns_and_freeze(writer, sheet_name: str) -> None:
 
     for col in worksheet.columns:
         max_length = 0
-        column = col[0].column_letter  # Get the column name (e.g., 'A')
+        column = get_column_letter(col[0].column)  # Get the column name (e.g., 'A')
         
         # Apply style to the first cell (header) in the column
         header_cell = col[0]
-        header_cell.font = header_font
-        header_cell.alignment = header_alignment
-        header_cell.border = thin_border
-        header_cell.fill = header_fill
+        if type(header_cell).__name__ != 'MergedCell':
+            header_cell.font = header_font
+            header_cell.alignment = header_alignment
+            header_cell.border = thin_border
+            header_cell.fill = header_fill
 
         for cell in col:
             # Apply border to all data cells in the populated range
-            if 1 < cell.row <= worksheet.max_row:
-                cell.border = thin_border
+            if type(cell).__name__ != 'MergedCell':
+                if 1 < cell.row <= worksheet.max_row:
+                    cell.border = thin_border
                 
             try:
                 # Calculate length of the string representation

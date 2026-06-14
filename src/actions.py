@@ -898,9 +898,10 @@ def write_recommendations_to_excel(filepath: str, new_recs_df: pd.DataFrame, rec
                     cell.font = Font(color='8B0000', bold=True)
 
     # Dynamic column widths auto-fitting
+    from openpyxl.utils import get_column_letter
     for col in ws.columns:
         max_len = 0
-        col_letter = col[0].column_letter
+        col_letter = get_column_letter(col[0].column)
         for cell in col:
             val_str = str(cell.value or '')
             if len(val_str) > max_len:

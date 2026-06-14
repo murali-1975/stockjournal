@@ -118,6 +118,40 @@ class TestProcessGroupedTrades(unittest.TestCase):
         labels = result.sort_values('Trade Date')['Tranches/Cheat'].tolist()
         self.assertEqual(labels, ['Tranch 1', 'Tranch 2', 'N/A', 'Tranch 1'])
 
+    def test_post_tranch_1_marginal_tolerance(self):
+        """Buys after Tranch 1 should follow tranche progression with +10% tolerance margin."""
+        # Config has TRANCH=100000, CHEAT=75000, TRANCH_TOLERANCE=0.10
+        config = {'TRANCH': 100000, 'CHEAT': 75000, 'TRANCH_TOLERANCE': 0.10}
+
+        # Case 1: Tiny buy (₹30,000) after Tranch 1 should be Tranch 2, not a Cheat
+        df1 = self._make_trades([
+            ('2025-01-01', 'RELIANCE', 'buy', 40, 2500),  # 100,000 -> Tranch 1
+            ('2025-01-02', 'RELIANCE', 'buy', 10, 3000),  # 30,000 -> Should be Tranch 2
+        ])
+        result1 = process_grouped_trades(df1, config)
+        labels1 = result1.sort_values('Trade Date')['Tranches/Cheat'].tolist()
+        self.assertEqual(labels1, ['Tranch 1', 'Tranch 2'])
+
+        # Case 2: Cumulative buy value of 210,000 (exactly +10% of Tranch 2 threshold 200,000) should be Tranch 2
+        df2 = self._make_trades([
+            ('2025-01-01', 'RELIANCE', 'buy', 40, 2500),  # 100,000 -> Tranch 1
+            ('2025-01-02', 'RELIANCE', 'buy', 30, 2500),  # 75,000 -> Tranch 2
+            ('2025-01-03', 'RELIANCE', 'buy', 14, 2500),  # 35,000 -> Cumulative 210,000 (<= 200,000 + 10%) -> Tranch 2
+        ])
+        result2 = process_grouped_trades(df2, config)
+        labels2 = result2.sort_values('Trade Date')['Tranches/Cheat'].tolist()
+        self.assertEqual(labels2, ['Tranch 1', 'Tranch 2', 'Tranch 2'])
+
+        # Case 3: Cumulative buy value of 211,000 (exceeds +10% of Tranch 2 threshold 200,000) should be Tranch 3
+        df3 = self._make_trades([
+            ('2025-01-01', 'RELIANCE', 'buy', 40, 2500),  # 100,000 -> Tranch 1
+            ('2025-01-02', 'RELIANCE', 'buy', 30, 2500),  # 75,000 -> Tranch 2
+            ('2025-01-03', 'RELIANCE', 'buy', 14, 2572),  # 36,008 -> Cumulative 211,008 (> 200,000 + 10%) -> Tranch 3
+        ])
+        result3 = process_grouped_trades(df3, config)
+        labels3 = result3.sort_values('Trade Date')['Tranches/Cheat'].tolist()
+        self.assertEqual(labels3, ['Tranch 1', 'Tranch 2', 'Tranch 3'])
+
 
 class TestStopLoss(unittest.TestCase):
     """Test suite for the _get_stop_loss function."""
