@@ -463,13 +463,13 @@ def save_workbook(
                                 r_range.api.FormatConditions.Delete()
                                 
                                 for color_name, style in COLOR_MAP.items():
-                                    formula = f'=VLOOKUP($J{movers_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $J{movers_formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000), Satellite_Watchlist!$C$2:$C$5000, "{color_name}")>0'
                                     fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
                                     fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
                                     fc.Font.Color = hex_to_bgr_decimal(style['font'])
                                     fc.Font.Bold = True
                                     
-                                default_formula = f'=ISNA(VLOOKUP($J{movers_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                default_formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $J{movers_formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000))=0'
                                 fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
                                 fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
                                 fc_def.Font.Bold = True
@@ -516,13 +516,13 @@ def save_workbook(
                                 wl_r_range.api.FormatConditions.Delete()
                                 
                                 for color_name, style in COLOR_MAP.items():
-                                    formula = f'=VLOOKUP($J{wl_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $J{wl_formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000), Satellite_Watchlist!$C$2:$C$5000, "{color_name}")>0'
                                     fc = wl_r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
                                     fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
                                     fc.Font.Color = hex_to_bgr_decimal(style['font'])
                                     fc.Font.Bold = True
                                     
-                                default_formula = f'=ISNA(VLOOKUP($J{wl_formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                default_formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $J{wl_formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000))=0'
                                 fc_def = wl_r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
                                 fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
                                 fc_def.Font.Bold = True
@@ -568,13 +568,13 @@ def save_workbook(
                                 r_range.api.FormatConditions.Delete()
                                 
                                 for color_name, style in COLOR_MAP.items():
-                                    formula = f'=VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $A{formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000), Satellite_Watchlist!$C$2:$C$5000, "{color_name}")>0'
                                     fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
                                     fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
                                     fc.Font.Color = hex_to_bgr_decimal(style['font'])
                                     fc.Font.Bold = True
                                     
-                                default_formula = f'=ISNA(VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                default_formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $A{formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000))=0'
                                 fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
                                 fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
                                 fc_def.Font.Bold = True
@@ -626,7 +626,7 @@ def save_workbook(
                                     'Core-Weekly':         {'bg': 'B1A0C7', 'font': '000000'}
                                 }
                                 for trend_name, style in CORE_COLOR_MAP.items():
-                                    formula = f'=VLOOKUP($A{formula_row}, Core_Watchlist!$B$2:$G$5000, 6, FALSE)="{trend_name}"'
+                                    formula = f'=COUNTIFS(Core_Watchlist!$B$2:$B$5000, $A{formula_row}, Core_Watchlist!$A$2:$A$5000, MAX(Core_Watchlist!$A$2:$A$5000), Core_Watchlist!$G$2:$G$5000, "{trend_name}")>0'
                                     fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
                                     fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
                                     fc.Font.Color = hex_to_bgr_decimal(style['font'])
@@ -668,13 +668,13 @@ def save_workbook(
                                 r_range.api.FormatConditions.Delete()
                                 
                                 for color_name, style in COLOR_MAP.items():
-                                    formula = f'=VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $A{formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000), Satellite_Watchlist!$C$2:$C$5000, "{color_name}")>0'
                                     fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
                                     fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
                                     fc.Font.Color = hex_to_bgr_decimal(style['font'])
                                     fc.Font.Bold = True
                                     
-                                default_formula = f'=ISNA(VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                default_formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $A{formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000))=0'
                                 fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
                                 fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
                                 fc_def.Font.Bold = True
@@ -716,13 +716,13 @@ def save_workbook(
                                 r_range.api.FormatConditions.Delete()
                                 
                                 for color_name, style in COLOR_MAP.items():
-                                    formula = f'=VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE)="{color_name}"'
+                                    formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $A{formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000), Satellite_Watchlist!$C$2:$C$5000, "{color_name}")>0'
                                     fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
                                     fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
                                     fc.Font.Color = hex_to_bgr_decimal(style['font'])
                                     fc.Font.Bold = True
                                     
-                                default_formula = f'=ISNA(VLOOKUP($A{formula_row}, Satellite_Watchlist!$B$2:$C$5000, 2, FALSE))'
+                                default_formula = f'=COUNTIFS(Satellite_Watchlist!$B$2:$B$5000, $A{formula_row}, Satellite_Watchlist!$A$2:$A$5000, MAX(Satellite_Watchlist!$A$2:$A$5000))=0'
                                 fc_def = r_range.api.FormatConditions.Add(Type=2, Formula1=default_formula)
                                 fc_def.Font.Color = hex_to_bgr_decimal('8B0000') # Dark Red
                                 fc_def.Font.Bold = True
@@ -770,7 +770,7 @@ def save_workbook(
                                     'Core-Weekly':         {'bg': 'B1A0C7', 'font': '000000'}
                                 }
                                 for trend_name, style in CORE_COLOR_MAP.items():
-                                    formula = f'=VLOOKUP($A{formula_row}, Core_Watchlist!$B$2:$G$5000, 6, FALSE)="{trend_name}"'
+                                    formula = f'=COUNTIFS(Core_Watchlist!$B$2:$B$5000, $A{formula_row}, Core_Watchlist!$A$2:$A$5000, MAX(Core_Watchlist!$A$2:$A$5000), Core_Watchlist!$G$2:$G$5000, "{trend_name}")>0'
                                     fc = r_range.api.FormatConditions.Add(Type=2, Formula1=formula)
                                     fc.Interior.Color = hex_to_bgr_decimal(style['bg'])
                                     fc.Font.Color = hex_to_bgr_decimal(style['font'])
